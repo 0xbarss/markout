@@ -6,6 +6,7 @@ target
 
 # Frontend
 /web/node_modules
+/web/dist
 
 # Project specific
 /docs
