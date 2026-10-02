@@ -7,11 +7,13 @@ pub mod config;
 pub mod event_bus;
 pub mod ingestion;
 pub mod models;
+pub mod replay;
 pub mod server;
 pub mod stats;
 
 pub use config::{Cli, Config, Mode};
 pub use event_bus::{EventBus, MarketEvent};
+pub use replay::{ReplayEngine, ReplayError, ReplayStatus, SUPPORTED_SPEEDS};
 
 pub use ingestion::Dataset;
 
