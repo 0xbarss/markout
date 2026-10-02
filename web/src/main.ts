@@ -11,6 +11,7 @@ import { initMobileDrawer } from "./ui/mobile.ts";
 import { mountReplayBar } from "./ui/replay_bar.ts";
 import { mountDrawingTools } from "./ui/tools.ts";
 import {
+  mountTradeOverlaySelector,
   renderAccount,
   renderHeaderStats,
   renderSymbol,
@@ -50,6 +51,9 @@ async function main(): Promise<void> {
   const replay = new ReplayController();
   mountReplayBar(replay);
   mountDrawingTools(chart.drawings);
+  mountTradeOverlaySelector((mode) => {
+    chart.setTradeOverlayMode(mode);
+  });
   initMobileDrawer();
 
   let bars = initialBars;
@@ -64,6 +68,11 @@ async function main(): Promise<void> {
   renderStats(stats);
 
   const ledger = mountLedger(trades, (t) => {
+    if (!t) {
+      chart.setSelectedTrade(null);
+      return;
+    }
+    chart.setSelectedTrade(t.id);
     const span = t.symbol === symbol ? spanOf(t, view) : null;
     if (!span) return;
     const pad = Math.max(20, Math.round((span[1] - span[0]) * 0.5));

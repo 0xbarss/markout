@@ -6,7 +6,7 @@ import { DrawingManager } from "./drawings/manager.ts";
 import type { CoordinateConverter } from "./drawings/types.ts";
 import { precisionFor } from "./format";
 import { buildMarkers } from "./overlays/markers";
-import { barIndexAt } from "./overlays/snap.ts";
+import { barIndexAt, locate } from "./overlays/snap.ts";
 import { buildTrail, type TrailPoint } from "./overlays/sl_tp_trail";
 import type { Bar, Trade } from "./types";
 
@@ -14,11 +14,15 @@ const UP = "#0ecb81", DOWN = "#f6465d";
 
 export interface Ohlc { open: number; high: number; low: number; close: number; }
 
+export type TradeOverlayMode = "focus" | "all" | "off";
+
 export interface TerminalChart {
   setBars(bars: Bar[], fit?: boolean): void;
   fit(): void;
   /** Draw entry/exit markers and SL/TP paths for `trades` against the bars currently shown. */
   setTrades(trades: Trade[], bars: Bar[]): void;
+  setTradeOverlayMode(mode: TradeOverlayMode): void;
+  setSelectedTrade(tradeId: number | null): void;
   /** Show bar indices [from, to] (relative to the bars passed to setBars). */
   focus(from: number, to: number): void;
   onCrosshair(cb: (ohlc: Ohlc | null) => void): void;
@@ -49,6 +53,13 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
   const lineOpts = { lineWidth: 1 as const, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false };
   const makeSl = () => chart.addLineSeries({ ...lineOpts, color: DOWN, lineStyle: LineStyle.Dashed, lineType: LineType.WithSteps });
   const makeTp = () => chart.addLineSeries({ ...lineOpts, color: UP, lineStyle: LineStyle.Dotted });
+  const tradeConnector = chart.addLineSeries({
+    lineWidth: 1 as const,
+    lineStyle: LineStyle.Dashed,
+    lastValueVisible: false,
+    priceLineVisible: false,
+    crosshairMarkerVisible: false,
+  });
   const toData = (pts: TrailPoint[]): (LineData | WhitespaceData)[] =>
     pts.map((p) => p.value === undefined
       ? { time: p.time as UTCTimestamp }
@@ -64,6 +75,9 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
   container.appendChild(drawingCanvas);
 
   let currentBars: Bar[] = [];
+  let lastTrades: Trade[] = [];
+  let currentOverlayMode: TradeOverlayMode = "focus";
+  let currentSelectedTradeId: number | null = null;
   const conv: CoordinateConverter = {
     timeToX: (t) => chart.timeScale().timeToCoordinate(t as UTCTimestamp),
     xToTime: (x) => chart.timeScale().coordinateToTime(x as any) as number | null,
@@ -126,11 +140,21 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
     },
 
     setTrades(trades, bars) {
-      candles.setMarkers(buildMarkers(trades, bars));
-      const trail = buildTrail(trades, bars);
-      sync(slLanes, trail.sl, makeSl);
-      sync(tpLanes, trail.tp, makeTp);
+      lastTrades = trades;
+      currentBars = bars;
+      updateTradeOverlays();
     },
+
+    setTradeOverlayMode(mode) {
+      currentOverlayMode = mode;
+      updateTradeOverlays();
+    },
+
+    setSelectedTrade(tradeId) {
+      currentSelectedTradeId = tradeId;
+      updateTradeOverlays();
+    },
+
     focus(from, to) {
       chart.timeScale().setVisibleLogicalRange({ from, to });
     },
@@ -141,4 +165,62 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       });
     },
   };
+
+  function updateTradeOverlays(): void {
+    if (currentOverlayMode === "off" || currentBars.length === 0) {
+      candles.setMarkers([]);
+      tradeConnector.setData([]);
+      sync(slLanes, [], makeSl);
+      sync(tpLanes, [], makeTp);
+      return;
+    }
+
+    if (currentOverlayMode === "focus") {
+      let focused: Trade[] = [];
+      if (currentSelectedTradeId !== null) {
+        const found = lastTrades.find((t) => t.id === currentSelectedTradeId);
+        if (found) focused = [found];
+      }
+      if (focused.length === 0) {
+        focused = lastTrades.filter((t) => t.exit_time === null);
+      }
+
+      candles.setMarkers(buildMarkers(focused, currentBars, false, currentSelectedTradeId));
+      const trail = buildTrail(focused, currentBars);
+      sync(slLanes, trail.sl, makeSl);
+      sync(tpLanes, trail.tp, makeTp);
+
+      if (focused.length === 1 && focused[0].exit_time !== null) {
+        const ft = focused[0];
+        const exitTime = ft.exit_time;
+        if (exitTime !== null) {
+          const ei = locate(currentBars, ft.entry_time);
+          const xi = locate(currentBars, exitTime);
+          if (ei >= 0 && xi >= 0) {
+            tradeConnector.applyOptions({
+              color: ft.pnl >= 0 ? "rgba(14, 203, 129, 0.7)" : "rgba(246, 70, 93, 0.7)",
+            });
+            tradeConnector.setData([
+              { time: currentBars[ei].time as UTCTimestamp, value: ft.entry_price },
+              { time: currentBars[xi].time as UTCTimestamp, value: ft.exit_price ?? ft.entry_price },
+            ]);
+          } else {
+            tradeConnector.setData([]);
+          }
+        } else {
+          tradeConnector.setData([]);
+        }
+      } else {
+        tradeConnector.setData([]);
+      }
+      return;
+    }
+
+    // "all" mode
+    tradeConnector.setData([]);
+    candles.setMarkers(buildMarkers(lastTrades, currentBars, true, currentSelectedTradeId));
+    const trail = buildTrail(lastTrades, currentBars);
+    sync(slLanes, trail.sl, makeSl);
+    sync(tpLanes, trail.tp, makeTp);
+  }
 }

@@ -52,3 +52,18 @@ export function renderAccount(account: AccountSnapshot): void {
   $("equity").textContent = fmtPrice(account.equity);
 }
 
+export function mountTradeOverlaySelector(
+  onSelect: (mode: "focus" | "all" | "off") => void,
+): void {
+  const container = document.getElementById("trade-mode-pills");
+  if (!container) return;
+  const buttons = container.querySelectorAll<HTMLButtonElement>("button");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const mode = (btn.dataset.mode || "focus") as "focus" | "all" | "off";
+      buttons.forEach((b) => b.classList.toggle("active", b === btn));
+      onSelect(mode);
+    });
+  });
+}
+

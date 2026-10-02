@@ -1,20 +1,28 @@
 import type { Bar } from "./types";
 
 export const TIMEFRAMES = [
-  { label: "1s", sec: 1 },
   { label: "1m", sec: 60 },
+  { label: "2m", sec: 120 },
   { label: "3m", sec: 180 },
   { label: "5m", sec: 300 },
+  { label: "6m", sec: 360 },
+  { label: "10m", sec: 600 },
+  { label: "12m", sec: 720 },
   { label: "15m", sec: 900 },
+  { label: "20m", sec: 1200 },
   { label: "30m", sec: 1800 },
   { label: "1h", sec: 3600 },
   { label: "2h", sec: 7200 },
+  { label: "3h", sec: 10800 },
   { label: "4h", sec: 14400 },
   { label: "6h", sec: 21600 },
+  { label: "8h", sec: 28800 },
   { label: "12h", sec: 43200 },
   { label: "1D", sec: 86400 },
   { label: "1W", sec: 604800 },
+  { label: "1M", sec: 2592000 },
 ] as const;
+
 
 
 /** Median spacing between bars in seconds (0 when it cannot be determined). */

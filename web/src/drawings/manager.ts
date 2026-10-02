@@ -1,9 +1,13 @@
+import { drawArrow } from "./arrow.ts";
 import { drawBoxZone } from "./box_zone.ts";
 import { drawFibonacci } from "./fibonacci.ts";
 import { drawHorizontal } from "./horizontal.ts";
 import { drawMeasure } from "./measure.ts";
 import { drawPosition } from "./position.ts";
+import { drawRay } from "./ray.ts";
+import { drawText } from "./text.ts";
 import { drawTrendline } from "./trendline.ts";
+import { drawVertical } from "./vertical.ts";
 import type {
   CoordinateConverter,
   Drawing,
@@ -20,8 +24,14 @@ export class DrawingManager {
   private activeTool: DrawingTool = "cursor";
   private pendingPoint: Point | null = null;
   private previewPoint: Point | null = null;
+  private selectedId: string | null = null;
+  private undoStack: Drawing[][] = [];
+  private draggingHandle: { drawingId: string; handleIdx: number } | null = null;
+  private draggingDrawing: { drawingId: string; startX: number; startY: number; startPt: Point } | null = null;
+
   private toolListeners = new Set<(tool: DrawingTool) => void>();
   private changeListeners = new Set<(count: number) => void>();
+  private selectListeners = new Set<(selected: Drawing | null) => void>();
 
   constructor(canvas: HTMLCanvasElement, conv: CoordinateConverter) {
     this.canvas = canvas;
@@ -31,15 +41,16 @@ export class DrawingManager {
     this.conv = conv;
 
     this.bindEvents();
+    this.bindKeyboard();
     this.setTool("cursor");
   }
 
   public setContext(symbol: string, _timeframe?: number): void {
     this.symbol = symbol;
     this.loadFromStorage();
+    this.selectedId = null;
     this.render();
   }
-
 
   public getActiveTool(): DrawingTool {
     return this.activeTool;
@@ -51,6 +62,9 @@ export class DrawingManager {
     this.previewPoint = null;
     this.canvas.style.pointerEvents = tool === "cursor" ? "none" : "auto";
     this.canvas.style.cursor = tool === "cursor" ? "default" : "crosshair";
+    if (tool !== "cursor") {
+      this.selectDrawing(null);
+    }
     this.emitTool();
     this.render();
   }
@@ -59,27 +73,71 @@ export class DrawingManager {
     return this.drawings;
   }
 
-  public addDrawing(drawing: Drawing): void {
-    this.drawings.push(drawing);
-    this.saveToStorage();
-    this.emitChange();
+  public getSelectedDrawing(): Drawing | null {
+    if (!this.selectedId) return null;
+    return this.drawings.find((d) => d.id === this.selectedId) ?? null;
+  }
+
+  public selectDrawing(id: string | null): void {
+    this.selectedId = id;
+    const selected = this.getSelectedDrawing();
+    for (const listener of this.selectListeners) {
+      listener(selected);
+    }
     this.render();
   }
 
-  public clear(): void {
-    this.drawings = [];
+  public onSelect(cb: (selected: Drawing | null) => void): () => void {
+    this.selectListeners.add(cb);
+    cb(this.getSelectedDrawing());
+    return () => this.selectListeners.delete(cb);
+  }
+
+  public addDrawing(drawing: Drawing): void {
+    this.pushUndo();
+    this.drawings.push(drawing);
+    this.saveToStorage();
+    this.emitChange();
+    this.selectDrawing(drawing.id);
+  }
+
+  public deleteSelected(): void {
+    if (!this.selectedId) return;
+    this.pushUndo();
+    this.drawings = this.drawings.filter((d) => d.id !== this.selectedId);
+    this.selectedId = null;
+    this.saveToStorage();
+    this.emitChange();
+    this.selectDrawing(null);
+  }
+
+  public undo(): void {
+    const prev = this.undoStack.pop();
+    if (!prev) return;
+    this.drawings = prev;
+    this.selectedId = null;
     this.pendingPoint = null;
     this.previewPoint = null;
     this.saveToStorage();
     this.emitChange();
-    this.render();
+    this.selectDrawing(null);
+  }
+
+  public clear(): void {
+    this.pushUndo();
+    this.drawings = [];
+    this.selectedId = null;
+    this.pendingPoint = null;
+    this.previewPoint = null;
+    this.saveToStorage();
+    this.emitChange();
+    this.selectDrawing(null);
   }
 
   public save(): boolean {
     this.saveToStorage();
     return true;
   }
-
 
   public onToolChange(cb: (tool: DrawingTool) => void): () => void {
     this.toolListeners.add(cb);
@@ -110,7 +168,10 @@ export class DrawingManager {
     this.ctx.clearRect(0, 0, width, height);
 
     for (const d of this.drawings) {
-      this.drawSingle(d, width);
+      this.drawSingle(d, width, height);
+      if (d.id === this.selectedId) {
+        this.drawSelectionHandles(d);
+      }
     }
 
     if (this.pendingPoint && this.previewPoint) {
@@ -118,19 +179,28 @@ export class DrawingManager {
       if (preview) {
         this.ctx.save();
         this.ctx.globalAlpha = 0.7;
-        this.drawSingle(preview, width);
+        this.drawSingle(preview, width, height);
         this.ctx.restore();
       }
     }
   }
 
-  private drawSingle(d: Drawing, width: number): void {
+  private drawSingle(d: Drawing, width: number, height: number): void {
     switch (d.type) {
       case "trendline":
         drawTrendline(this.ctx, d, this.conv, width);
         break;
+      case "ray":
+        drawRay(this.ctx, d, this.conv, width);
+        break;
       case "horizontal":
         drawHorizontal(this.ctx, d, this.conv, width);
+        break;
+      case "vertical":
+        drawVertical(this.ctx, d, this.conv, height);
+        break;
+      case "arrow":
+        drawArrow(this.ctx, d, this.conv);
         break;
       case "box_zone":
         drawBoxZone(this.ctx, d, this.conv);
@@ -144,6 +214,50 @@ export class DrawingManager {
       case "measure":
         drawMeasure(this.ctx, d, this.conv);
         break;
+      case "text":
+        drawText(this.ctx, d, this.conv);
+        break;
+    }
+  }
+
+  private drawSelectionHandles(d: Drawing): void {
+    const pts = this.getControlPoints(d);
+    this.ctx.save();
+    for (const p of pts) {
+      const x = this.conv.timeToX(p.time);
+      const y = this.conv.priceToY(p.price);
+      if (x === null || y === null) continue;
+      this.ctx.fillStyle = "#ffffff";
+      this.ctx.strokeStyle = "#f7a600";
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.stroke();
+    }
+    this.ctx.restore();
+  }
+
+  private getControlPoints(d: Drawing): Point[] {
+    switch (d.type) {
+      case "trendline":
+      case "ray":
+      case "arrow":
+      case "fibonacci":
+      case "measure":
+        return [d.p1, d.p2];
+      case "box_zone":
+        return [d.p1, d.p2, { time: d.p1.time, price: d.p2.price }, { time: d.p2.time, price: d.p1.price }];
+      case "horizontal":
+        return d.time ? [{ time: d.time, price: d.price }] : [];
+      case "vertical":
+        return [{ time: d.time, price: this.conv.yToPrice(50) ?? 0 }];
+      case "position":
+        return [d.entry, { time: d.endTime, price: d.targetPrice }, { time: d.endTime, price: d.stopPrice }];
+      case "text":
+        return [d.p1];
+      default:
+        return [];
     }
   }
 
@@ -151,6 +265,10 @@ export class DrawingManager {
     switch (this.activeTool) {
       case "trendline":
         return { id: "preview", type: "trendline", p1, p2, ray: false };
+      case "ray":
+        return { id: "preview", type: "ray", p1, p2 };
+      case "arrow":
+        return { id: "preview", type: "arrow", p1, p2 };
       case "box_zone":
         return { id: "preview", type: "box_zone", p1, p2 };
       case "fibonacci":
@@ -176,12 +294,106 @@ export class DrawingManager {
     }
   }
 
+  private bindKeyboard(): void {
+    if (typeof window === "undefined") return;
+    window.addEventListener("keydown", (e) => {
+      if (typeof HTMLInputElement !== "undefined" && e.target instanceof HTMLInputElement) return;
+      if (typeof HTMLTextAreaElement !== "undefined" && e.target instanceof HTMLTextAreaElement) return;
+
+      if ((e.key === "Delete" || e.key === "Backspace") && this.selectedId) {
+        e.preventDefault();
+        this.deleteSelected();
+      } else if (e.key === "Escape") {
+        if (this.pendingPoint) {
+          this.pendingPoint = null;
+          this.previewPoint = null;
+          this.render();
+        } else if (this.selectedId) {
+          this.selectDrawing(null);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        this.undo();
+      }
+    });
+  }
+
+  private checkHandleHit(px: number, py: number): { drawingId: string; handleIdx: number } | null {
+    if (!this.selectedId) return null;
+    const selected = this.getSelectedDrawing();
+    if (!selected) return null;
+    const handles = this.getControlPoints(selected);
+    for (let i = 0; i < handles.length; i++) {
+      const hx = this.conv.timeToX(handles[i].time);
+      const hy = this.conv.priceToY(handles[i].price);
+      if (hx !== null && hy !== null && Math.hypot(px - hx, py - hy) <= 8) {
+        return { drawingId: selected.id, handleIdx: i };
+      }
+    }
+    return null;
+  }
+
   private bindEvents(): void {
+    const parent = this.canvas.parentElement;
+    if (parent && typeof parent.addEventListener === "function") {
+      parent.addEventListener("pointermove", (e) => {
+        if (this.activeTool !== "cursor") return;
+        if (this.draggingHandle || this.draggingDrawing) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+
+        const handleHit = this.checkHandleHit(px, py);
+        const drawingHit = !handleHit && this.hitTest(px, py) !== null;
+        if (handleHit || drawingHit) {
+          this.canvas.style.pointerEvents = "auto";
+          this.canvas.style.cursor = handleHit ? "grab" : "pointer";
+        } else {
+          this.canvas.style.pointerEvents = "none";
+          this.canvas.style.cursor = "default";
+        }
+      });
+
+      parent.addEventListener("pointerdown", (e) => {
+        if (e.target !== this.canvas && this.selectedId) {
+          this.selectDrawing(null);
+        }
+      });
+    }
+
     this.canvas.addEventListener("pointerdown", (e) => {
-      if (this.activeTool === "cursor") return;
       const pt = this.eventToPoint(e);
       if (!pt) return;
 
+      if (this.activeTool === "cursor") {
+        const rect = this.canvas.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+
+        // Check if clicked on a selected drawing's control handle
+        const handleHit = this.checkHandleHit(px, py);
+        if (handleHit) {
+          this.pushUndo();
+          this.draggingHandle = handleHit;
+          try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+          return;
+        }
+
+        // Check hit testing on drawings
+        const hit = this.hitTest(px, py);
+        if (hit) {
+          this.pushUndo();
+          this.selectDrawing(hit.id);
+          this.draggingDrawing = { drawingId: hit.id, startX: px, startY: py, startPt: pt };
+          try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+        } else {
+          this.selectDrawing(null);
+          this.canvas.style.pointerEvents = "none";
+        }
+        return;
+      }
+
+      // Single-click placement tools
       if (this.activeTool === "horizontal") {
         this.addDrawing({
           id: `h_${Date.now()}`,
@@ -193,6 +405,33 @@ export class DrawingManager {
         return;
       }
 
+      if (this.activeTool === "vertical") {
+        this.addDrawing({
+          id: `v_${Date.now()}`,
+          type: "vertical",
+          time: pt.time,
+        });
+        this.setTool("cursor");
+        return;
+      }
+
+      if (this.activeTool === "text") {
+        const text = (typeof window !== "undefined" && typeof window.prompt === "function")
+          ? window.prompt("Annotation note:", "Note")
+          : "Note";
+        if (text && text.trim().length > 0) {
+          this.addDrawing({
+            id: `t_${Date.now()}`,
+            type: "text",
+            p1: pt,
+            text: text.trim(),
+          });
+        }
+        this.setTool("cursor");
+        return;
+      }
+
+      // Two-click placement tools
       if (!this.pendingPoint) {
         this.pendingPoint = pt;
       } else {
@@ -208,10 +447,194 @@ export class DrawingManager {
     });
 
     this.canvas.addEventListener("pointermove", (e) => {
-      if (this.activeTool === "cursor" || !this.pendingPoint) return;
-      this.previewPoint = this.eventToPoint(e);
-      this.render();
+      const pt = this.eventToPoint(e);
+      if (!pt) return;
+
+      if (this.draggingHandle) {
+        this.handleDragPoint(this.draggingHandle.drawingId, this.draggingHandle.handleIdx, pt);
+        this.render();
+        return;
+      }
+
+      if (this.draggingDrawing) {
+        this.handleMoveDrawing(this.draggingDrawing.drawingId, pt, this.draggingDrawing.startPt);
+        this.draggingDrawing.startPt = pt;
+        this.render();
+        return;
+      }
+
+      if (this.activeTool === "cursor") {
+        const rect = this.canvas.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        const hitHandle = this.checkHandleHit(px, py);
+        const hitDrawing = !hitHandle && this.hitTest(px, py) !== null;
+        if (hitHandle || hitDrawing) {
+          this.canvas.style.cursor = hitHandle ? "grab" : "pointer";
+        } else {
+          this.canvas.style.pointerEvents = "none";
+          this.canvas.style.cursor = "default";
+        }
+        return;
+      }
+
+      if (this.pendingPoint) {
+        this.previewPoint = pt;
+        this.render();
+      }
     });
+
+    const finishDrag = (e: PointerEvent) => {
+      if (this.draggingHandle || this.draggingDrawing) {
+        try { this.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+        this.saveToStorage();
+        this.draggingHandle = null;
+        this.draggingDrawing = null;
+        if (this.activeTool === "cursor") {
+          this.canvas.style.pointerEvents = "none";
+        }
+      }
+    };
+
+    this.canvas.addEventListener("pointerup", finishDrag);
+    this.canvas.addEventListener("pointercancel", finishDrag);
+  }
+
+  private handleDragPoint(drawingId: string, handleIdx: number, pt: Point): void {
+    const d = this.drawings.find((x) => x.id === drawingId);
+    if (!d) return;
+
+    switch (d.type) {
+      case "trendline":
+      case "ray":
+      case "arrow":
+      case "fibonacci":
+      case "measure":
+        if (handleIdx === 0) d.p1 = pt;
+        else if (handleIdx === 1) d.p2 = pt;
+        break;
+      case "box_zone":
+        if (handleIdx === 0) d.p1 = pt;
+        else if (handleIdx === 1) d.p2 = pt;
+        break;
+      case "horizontal":
+        d.price = pt.price;
+        d.time = pt.time;
+        break;
+      case "vertical":
+        d.time = pt.time;
+        break;
+      case "text":
+        d.p1 = pt;
+        break;
+    }
+  }
+
+  private handleMoveDrawing(drawingId: string, currentPt: Point, prevPt: Point): void {
+    const d = this.drawings.find((x) => x.id === drawingId);
+    if (!d) return;
+
+    const dt = currentPt.time - prevPt.time;
+    const dp = currentPt.price - prevPt.price;
+
+    switch (d.type) {
+      case "trendline":
+      case "ray":
+      case "arrow":
+      case "fibonacci":
+      case "measure":
+      case "box_zone":
+        d.p1 = { time: d.p1.time + dt, price: d.p1.price + dp };
+        d.p2 = { time: d.p2.time + dt, price: d.p2.price + dp };
+        break;
+      case "horizontal":
+        d.price += dp;
+        if (d.time) d.time += dt;
+        break;
+      case "vertical":
+        d.time += dt;
+        break;
+      case "text":
+        d.p1 = { time: d.p1.time + dt, price: d.p1.price + dp };
+        break;
+      case "position":
+        d.entry = { time: d.entry.time + dt, price: d.entry.price + dp };
+        d.targetPrice += dp;
+        d.stopPrice += dp;
+        d.endTime += dt;
+        break;
+    }
+  }
+
+  private hitTest(px: number, py: number): Drawing | null {
+    for (let i = this.drawings.length - 1; i >= 0; i--) {
+      const d = this.drawings[i];
+      if (this.isNearDrawing(d, px, py)) {
+        return d;
+      }
+    }
+    return null;
+  }
+
+  private isNearDrawing(d: Drawing, px: number, py: number): boolean {
+    const tol = 8;
+    switch (d.type) {
+      case "horizontal": {
+        const y = this.conv.priceToY(d.price);
+        return y !== null && Math.abs(py - y) <= tol;
+      }
+      case "vertical": {
+        const x = this.conv.timeToX(d.time);
+        return x !== null && Math.abs(px - x) <= tol;
+      }
+      case "trendline":
+      case "ray":
+      case "arrow":
+      case "fibonacci":
+      case "measure": {
+        const x1 = this.conv.timeToX(d.p1.time);
+        const y1 = this.conv.priceToY(d.p1.price);
+        const x2 = this.conv.timeToX(d.p2.time);
+        const y2 = this.conv.priceToY(d.p2.price);
+        if (x1 === null || y1 === null || x2 === null || y2 === null) return false;
+        return this.distToSegment(px, py, x1, y1, x2, y2) <= tol;
+      }
+      case "box_zone": {
+        const x1 = this.conv.timeToX(d.p1.time);
+        const y1 = this.conv.priceToY(d.p1.price);
+        const x2 = this.conv.timeToX(d.p2.time);
+        const y2 = this.conv.priceToY(d.p2.price);
+        if (x1 === null || y1 === null || x2 === null || y2 === null) return false;
+        const minX = Math.min(x1, x2), maxX = Math.max(x1, x2);
+        const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
+        return px >= minX - tol && px <= maxX + tol && py >= minY - tol && py <= maxY + tol;
+      }
+      case "text": {
+        const x = this.conv.timeToX(d.p1.time);
+        const y = this.conv.priceToY(d.p1.price);
+        if (x === null || y === null) return false;
+        return Math.hypot(px - x, py - y) <= 20;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const projX = x1 + t * dx;
+    const projY = y1 + t * dy;
+    return Math.hypot(px - projX, py - projY);
+  }
+
+  private pushUndo(): void {
+    this.undoStack.push(JSON.parse(JSON.stringify(this.drawings)));
+    if (this.undoStack.length > 50) this.undoStack.shift();
   }
 
   private eventToPoint(e: PointerEvent): Point | null {
@@ -233,7 +656,6 @@ export class DrawingManager {
   private storageKey(): string {
     return `markout:drawings:${this.symbol}`;
   }
-
 
   private saveToStorage(): void {
     try {

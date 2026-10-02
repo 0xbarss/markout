@@ -6,11 +6,15 @@ export interface Point {
 export type DrawingTool =
   | "cursor"
   | "trendline"
+  | "ray"
   | "horizontal"
+  | "vertical"
+  | "arrow"
   | "box_zone"
   | "fibonacci"
   | "position"
-  | "measure";
+  | "measure"
+  | "text";
 
 export interface TrendlineDrawing {
   id: string;
@@ -20,11 +24,31 @@ export interface TrendlineDrawing {
   ray?: boolean;
 }
 
+export interface RayDrawing {
+  id: string;
+  type: "ray";
+  p1: Point;
+  p2: Point;
+}
+
 export interface HorizontalDrawing {
   id: string;
   type: "horizontal";
   price: number;
   time?: number;
+}
+
+export interface VerticalDrawing {
+  id: string;
+  type: "vertical";
+  time: number;
+}
+
+export interface ArrowDrawing {
+  id: string;
+  type: "arrow";
+  p1: Point;
+  p2: Point;
 }
 
 export interface BoxZoneDrawing {
@@ -59,13 +83,25 @@ export interface MeasureDrawing {
   p2: Point;
 }
 
+export interface TextDrawing {
+  id: string;
+  type: "text";
+  p1: Point;
+  text: string;
+}
+
 export type Drawing =
   | TrendlineDrawing
+  | RayDrawing
   | HorizontalDrawing
+  | VerticalDrawing
+  | ArrowDrawing
   | BoxZoneDrawing
   | FibonacciDrawing
   | PositionDrawing
-  | MeasureDrawing;
+  | MeasureDrawing
+  | TextDrawing;
+
 
 export interface CoordinateConverter {
   timeToX(time: number): number | null;

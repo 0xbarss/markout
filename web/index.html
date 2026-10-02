@@ -4,8 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0e11" />
-  <title>Markout — Quantitative Trading Terminal</title>
+  <title>Markout</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 </head>
+
 <body>
   <div id="app">
     <header class="topbar">
@@ -16,6 +18,14 @@
       </div>
       <div id="symbol" class="symbol">—</div>
       <div id="tf-pills" class="pills"></div>
+      <div class="trade-pills-wrap">
+        <span class="pill-label">Trades:</span>
+        <div id="trade-mode-pills" class="pills">
+          <button data-mode="focus" class="active" title="Focus selected trade or open positions">Focus</button>
+          <button data-mode="all" title="Show all trades">All</button>
+          <button data-mode="off" title="Hide all trades">Off</button>
+        </div>
+      </div>
       <div class="spacer"></div>
       <div class="ticker"><span id="last-price">—</span><span id="last-change" class="chg"></span></div>
       <div class="stat"><span class="lbl">Equity</span><span id="equity">—</span></div>
@@ -24,12 +34,19 @@
 
     <aside class="tools" aria-label="Drawing tools">
       <button id="tool-cursor" class="active" title="Crosshair / Select">✛</button>
-      <button id="tool-trendline" title="Trendline">/</button>
+      <button id="tool-trendline" title="Trendline">╱</button>
+      <button id="tool-ray" title="Ray">⟶</button>
       <button id="tool-horizontal" title="Horizontal line">─</button>
+      <button id="tool-vertical" title="Vertical line">│</button>
+      <button id="tool-arrow" title="Arrow">↗</button>
       <button id="tool-box" title="Zone box">□</button>
       <button id="tool-fibonacci" title="Fibonacci">≡</button>
       <button id="tool-position" title="Position Risk-Reward">⤢</button>
       <button id="tool-measure" title="Measure ruler">📏</button>
+      <button id="tool-text" title="Text note">T</button>
+      <div class="tool-sep"></div>
+      <button id="tool-undo" title="Undo (Ctrl+Z)">↺</button>
+      <button id="tool-delete" title="Delete selected (Del / Backspace)" disabled>⌫</button>
       <button id="tool-save" title="Save drawings">💾</button>
       <button id="tool-clear" title="Clear all drawings">🗑</button>
     </aside>

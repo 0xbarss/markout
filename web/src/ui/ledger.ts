@@ -29,7 +29,7 @@ export interface LedgerHandle {
   update(trades: Trade[]): void;
 }
 
-export function mountLedger(trades: Trade[], onSelect: (t: Trade) => void): LedgerHandle {
+export function mountLedger(trades: Trade[], onSelect: (t: Trade | null) => void): LedgerHandle {
   let currentTrades = trades;
   let open = currentTrades.filter((t) => t.exit_time === null);
   let closed = currentTrades.filter((t) => t.exit_time !== null).sort((a, b) => (b.exit_time as number) - (a.exit_time as number));
@@ -60,7 +60,16 @@ export function mountLedger(trades: Trade[], onSelect: (t: Trade) => void): Ledg
       for (const t of list) {
         const tr = row(t);
         if (t.id === selected) tr.classList.add("selected");
-        tr.addEventListener("click", () => { selected = t.id; onSelect(t); render(); });
+        tr.addEventListener("click", () => {
+          if (selected === t.id) {
+            selected = null;
+            onSelect(null);
+          } else {
+            selected = t.id;
+            onSelect(t);
+          }
+          render();
+        });
         body.append(tr);
       }
     }
