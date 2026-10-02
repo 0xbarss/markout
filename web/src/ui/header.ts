@@ -1,23 +1,27 @@
 import { $, h } from "../dom";
 import { fmtPrice, fmtSigned, signClass } from "../format";
-import { TIMEFRAMES } from "../resample";
+import { isResamplable, TIMEFRAMES } from "../resample";
 import type { AccountSnapshot, Bar, Stats, Tick } from "../types.ts";
 
 export function renderSymbol(symbol: string): void {
   $("symbol").textContent = symbol;
 }
 
-/** Timeframe pills; those finer than the data's native interval are disabled. */
+/** Timeframe pills; those not cleanly aggregatable from the data's native interval are disabled. */
 export function renderTimeframes(base: number, active: number, onSelect: (sec: number) => void): void {
   const el = $("tf-pills");
   el.replaceChildren();
   for (const tf of TIMEFRAMES) {
     const b = h("button", tf.sec === active ? "active" : "", tf.label);
-    b.disabled = base === 0 || tf.sec < base;
-    b.addEventListener("click", () => onSelect(tf.sec));
+    const valid = isResamplable(base, tf.sec);
+    b.disabled = !valid;
+    if (valid) {
+      b.addEventListener("click", () => onSelect(tf.sec));
+    }
     el.append(b);
   }
 }
+
 
 export function renderTicker(bars: Bar[]): void {
   const last = bars[bars.length - 1];

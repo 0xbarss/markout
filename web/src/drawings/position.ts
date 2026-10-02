@@ -27,22 +27,26 @@ export function drawPosition(
   const targetPct = d.entry.price !== 0 ? ((d.targetPrice - d.entry.price) / d.entry.price) * 100 : 0;
   const stopPct = d.entry.price !== 0 ? ((d.stopPrice - d.entry.price) / d.entry.price) * 100 : 0;
 
+  const isLong = d.side !== "short";
+  const targetColor = d.targetColor ?? "#0ecb81";
+  const stopColor = d.stopColor ?? "#f6465d";
+
   ctx.save();
 
-  // Target box (green)
+  // Target box (green for long / customizable)
   const topTarget = Math.min(yEntry, yTarget);
   const heightTarget = Math.abs(yTarget - yEntry);
-  ctx.fillStyle = "rgba(14, 203, 129, 0.16)";
-  ctx.strokeStyle = "#0ecb81";
+  ctx.fillStyle = isLong ? "rgba(14, 203, 129, 0.16)" : "rgba(14, 203, 129, 0.16)";
+  ctx.strokeStyle = targetColor;
   ctx.lineWidth = 1;
   ctx.fillRect(left, topTarget, width, heightTarget);
   ctx.strokeRect(left, topTarget, width, heightTarget);
 
-  // Stop box (red)
+  // Stop box (red for long / customizable)
   const topStop = Math.min(yEntry, yStop);
   const heightStop = Math.abs(yStop - yEntry);
-  ctx.fillStyle = "rgba(246, 70, 93, 0.16)";
-  ctx.strokeStyle = "#f6465d";
+  ctx.fillStyle = isLong ? "rgba(246, 70, 93, 0.16)" : "rgba(246, 70, 93, 0.16)";
+  ctx.strokeStyle = stopColor;
   ctx.fillRect(left, topStop, width, heightStop);
   ctx.strokeRect(left, topStop, width, heightStop);
 
@@ -57,6 +61,7 @@ export function drawPosition(
 
   ctx.fillStyle = "#161b22";
   ctx.strokeStyle = "#262932";
+
   ctx.beginPath();
   ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3);
   ctx.fill();

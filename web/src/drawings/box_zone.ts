@@ -1,3 +1,4 @@
+import { applyLineDash } from "./style_utils.ts";
 import type { BoxZoneDrawing, CoordinateConverter } from "./types.ts";
 
 export function drawBoxZone(
@@ -17,18 +18,28 @@ export function drawBoxZone(
   const width = Math.abs(x2 - x1);
   const height = Math.abs(y2 - y1);
 
+  const strokeColor = d.color ?? "rgba(41, 182, 246, 0.6)";
+  const fillColor = d.fillColor ?? "rgba(41, 182, 246, 0.12)";
+  const lineWidth = d.lineWidth ?? 1;
+
   ctx.save();
-  ctx.fillStyle = "rgba(41, 182, 246, 0.12)";
-  ctx.strokeStyle = "rgba(41, 182, 246, 0.6)";
-  ctx.lineWidth = 1;
+  ctx.fillStyle = fillColor;
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = lineWidth;
 
   ctx.fillRect(left, top, width, height);
+
+  applyLineDash(ctx, d.lineStyle);
   ctx.strokeRect(left, top, width, height);
 
   const label = d.label ?? "Zone";
-  ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
-  ctx.fillStyle = "rgba(41, 182, 246, 0.9)";
-  ctx.fillText(label, left + 4, top + 12);
+  if (label.trim().length > 0) {
+    ctx.setLineDash([]);
+    ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillStyle = strokeColor;
+    ctx.fillText(label, left + 4, top + 12);
+  }
 
   ctx.restore();
 }
+

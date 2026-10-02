@@ -1,3 +1,4 @@
+import { applyLineDash } from "./style_utils.ts";
 import type { CoordinateConverter, TrendlineDrawing } from "./types.ts";
 
 export function drawTrendline(
@@ -13,24 +14,42 @@ export function drawTrendline(
 
   if (x1 === null || y1 === null || x2 === null || y2 === null) return;
 
-  ctx.save();
-  ctx.strokeStyle = "#f7a600";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
+  const color = d.color ?? "#f7a600";
+  const lineWidth = d.lineWidth ?? 1.5;
 
-  if (d.ray && x2 !== x1) {
-    const slope = (y2 - y1) / (x2 - x1);
-    const targetX = x2 > x1 ? canvasWidth : 0;
-    const targetY = y1 + slope * (targetX - x1);
-    ctx.lineTo(targetX, targetY);
-  } else {
-    ctx.lineTo(x2, y2);
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  applyLineDash(ctx, d.lineStyle);
+
+  let startX = x1;
+  let startY = y1;
+  let endX = x2;
+  let endY = y2;
+
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+
+  if (Math.abs(dx) > 0.0001) {
+    const slope = dy / dx;
+    if (d.ray || d.extendRight) {
+      endX = dx > 0 ? canvasWidth : 0;
+      endY = y1 + slope * (endX - x1);
+    }
+    if (d.extendLeft) {
+      startX = dx > 0 ? 0 : canvasWidth;
+      startY = y1 + slope * (startX - x1);
+    }
   }
+
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
   ctx.stroke();
 
   // Anchor dots
-  ctx.fillStyle = "#f7a600";
+  ctx.fillStyle = color;
+  ctx.setLineDash([]);
   ctx.beginPath();
   ctx.arc(x1, y1, 3, 0, Math.PI * 2);
   ctx.fill();
@@ -40,3 +59,4 @@ export function drawTrendline(
 
   ctx.restore();
 }
+

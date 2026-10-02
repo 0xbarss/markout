@@ -34,8 +34,21 @@ export function baseInterval(bars: Bar[]): number {
   return diffs[Math.floor(diffs.length / 2)];
 }
 
+/**
+ * Checks if a target timeframe interval (in seconds) can be cleanly aggregated from a base interval.
+ * Returns true only if targetSec >= baseSec and targetSec is an integer multiple of baseSec.
+ */
+export function isResamplable(baseSec: number, targetSec: number): boolean {
+  if (baseSec <= 0 || targetSec <= 0) return false;
+  if (targetSec < baseSec) return false;
+  return targetSec % baseSec === 0;
+}
+
 /** Aggregate bars into `sec`-second buckets aligned to the Unix epoch (UTC). */
-export function resample(bars: Bar[], sec: number): Bar[] {
+export function resample(bars: Bar[], sec: number, baseSec?: number): Bar[] {
+  if (baseSec && !isResamplable(baseSec, sec)) {
+    return bars;
+  }
   const out: Bar[] = [];
   for (const b of bars) {
     const t = Math.floor(b.time / sec) * sec;
@@ -51,3 +64,4 @@ export function resample(bars: Bar[], sec: number): Bar[] {
   }
   return out;
 }
+

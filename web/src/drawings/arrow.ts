@@ -1,3 +1,4 @@
+import { applyLineDash } from "./style_utils.ts";
 import type { ArrowDrawing, CoordinateConverter } from "./types.ts";
 
 export function drawArrow(
@@ -12,10 +13,14 @@ export function drawArrow(
 
   if (x1 === null || y1 === null || x2 === null || y2 === null) return;
 
+  const color = d.color ?? "#f7a600";
+  const lineWidth = d.lineWidth ?? 2;
+
   ctx.save();
-  ctx.strokeStyle = "#f7a600";
-  ctx.fillStyle = "#f7a600";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = lineWidth;
+  applyLineDash(ctx, d.lineStyle);
 
   // Main shaft
   ctx.beginPath();
@@ -24,8 +29,9 @@ export function drawArrow(
   ctx.stroke();
 
   // Arrowhead
+  ctx.setLineDash([]);
   const angle = Math.atan2(y2 - y1, x2 - x1);
-  const headLen = 12;
+  const headLen = Math.max(10, lineWidth * 5);
   ctx.beginPath();
   ctx.moveTo(x2, y2);
   ctx.lineTo(
@@ -41,3 +47,4 @@ export function drawArrow(
 
   ctx.restore();
 }
+

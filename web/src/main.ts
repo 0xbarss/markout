@@ -4,7 +4,8 @@ import { createTerminalChart, type Ohlc } from "./chart.ts";
 import { $, h } from "./dom.ts";
 import { fmtPrice, fmtSigned, signClass } from "./format.ts";
 import { spanOf } from "./overlays/sl_tp_trail.ts";
-import { baseInterval, resample, TIMEFRAMES } from "./resample.ts";
+import { baseInterval, isResamplable, resample, TIMEFRAMES } from "./resample.ts";
+
 import { ReplayController } from "./replay/controller.ts";
 import { computeStats } from "./stats.ts";
 import { initMobileDrawer } from "./ui/mobile.ts";
@@ -124,13 +125,21 @@ async function main(): Promise<void> {
   });
 
   let base = baseInterval(bars);
-  let active = TIMEFRAMES.find((t) => t.sec >= base)?.sec ?? 0;
+  let active = TIMEFRAMES.find((t) => isResamplable(base, t.sec))?.sec ?? base;
   const apply = () => {
-    view = active === base || base === 0 ? bars : resample(bars, active);
+    if (!isResamplable(base, active)) {
+      active = base;
+    }
+    view = active === base || base === 0 ? bars : resample(bars, active, base);
     replay.setData(view, overlayTrades, overlaySignals);
     chart.fit();
     chart.drawings.setContext(symbol, active);
-    renderTimeframes(base, active, (sec) => { active = sec; apply(); });
+    renderTimeframes(base, active, (sec) => {
+      if (isResamplable(base, sec)) {
+        active = sec;
+        apply();
+      }
+    });
   };
 
   chart.onCrosshair((o) => {
@@ -149,10 +158,11 @@ async function main(): Promise<void> {
           bars.push(b);
           $("empty").hidden = true;
           base = baseInterval(bars);
-          active = TIMEFRAMES.find((t) => t.sec >= base)?.sec ?? 0;
+          active = TIMEFRAMES.find((t) => isResamplable(base, t.sec))?.sec ?? base;
           apply();
           return;
         }
+
 
         const last = bars[bars.length - 1];
         if (b.time === last.time) {

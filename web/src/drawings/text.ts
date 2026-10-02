@@ -10,15 +10,20 @@ export function drawText(
 
   if (x === null || y === null) return;
 
+  const fontSize = d.fontSize ?? 12;
+  const textColor = d.color ?? "#eaecef";
+  const bgColor = d.backgroundColor ?? "rgba(22, 27, 34, 0.9)";
+  const borderColor = d.borderColor ?? "#f7a600";
+
   ctx.save();
-  ctx.font = "12px sans-serif";
+  ctx.font = `${fontSize}px sans-serif`;
   const metrics = ctx.measureText(d.text);
   const padX = 8;
   const w = metrics.width + padX * 2;
-  const h = 22;
+  const h = fontSize + 10;
 
-  ctx.fillStyle = "rgba(22, 27, 34, 0.9)";
-  ctx.strokeStyle = "#f7a600";
+  ctx.fillStyle = bgColor;
+  ctx.strokeStyle = borderColor;
   ctx.lineWidth = 1;
 
   ctx.beginPath();
@@ -26,8 +31,10 @@ export function drawText(
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = "#eaecef";
-  ctx.fillText(d.text, x + padX, y + 4);
+  ctx.fillStyle = textColor;
+  ctx.textBaseline = "middle";
+  ctx.fillText(d.text, x + padX, y);
 
   ctx.restore();
 }
+

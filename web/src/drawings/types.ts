@@ -16,54 +16,70 @@ export type DrawingTool =
   | "measure"
   | "text";
 
-export interface TrendlineDrawing {
+export type LineStyleType = "solid" | "dashed" | "dotted";
+
+export interface DrawingStyleProps {
+  color?: string;
+  lineWidth?: number;
+  lineStyle?: LineStyleType;
+}
+
+export interface TrendlineDrawing extends DrawingStyleProps {
   id: string;
   type: "trendline";
   p1: Point;
   p2: Point;
   ray?: boolean;
+  extendLeft?: boolean;
+  extendRight?: boolean;
 }
 
-export interface RayDrawing {
+export interface RayDrawing extends DrawingStyleProps {
   id: string;
   type: "ray";
   p1: Point;
   p2: Point;
 }
 
-export interface HorizontalDrawing {
+export interface HorizontalDrawing extends DrawingStyleProps {
   id: string;
   type: "horizontal";
   price: number;
   time?: number;
+  showPrice?: boolean;
 }
 
-export interface VerticalDrawing {
+export interface VerticalDrawing extends DrawingStyleProps {
   id: string;
   type: "vertical";
   time: number;
+  showTime?: boolean;
 }
 
-export interface ArrowDrawing {
+export interface ArrowDrawing extends DrawingStyleProps {
   id: string;
   type: "arrow";
   p1: Point;
   p2: Point;
 }
 
-export interface BoxZoneDrawing {
+export interface BoxZoneDrawing extends DrawingStyleProps {
   id: string;
   type: "box_zone";
   p1: Point;
   p2: Point;
   label?: string;
+  fillColor?: string;
 }
 
-export interface FibonacciDrawing {
+export interface FibonacciDrawing extends DrawingStyleProps {
   id: string;
   type: "fibonacci";
   p1: Point;
   p2: Point;
+  extendLines?: boolean;
+  extendLeft?: boolean;
+  extendRight?: boolean;
 }
 
 export interface PositionDrawing {
@@ -74,13 +90,17 @@ export interface PositionDrawing {
   targetPrice: number;
   stopPrice: number;
   endTime: number;
+  color?: string;
+  targetColor?: string;
+  stopColor?: string;
 }
 
-export interface MeasureDrawing {
+export interface MeasureDrawing extends DrawingStyleProps {
   id: string;
   type: "measure";
   p1: Point;
   p2: Point;
+  fillColor?: string;
 }
 
 export interface TextDrawing {
@@ -88,6 +108,10 @@ export interface TextDrawing {
   type: "text";
   p1: Point;
   text: string;
+  color?: string;
+  fontSize?: number;
+  backgroundColor?: string;
+  borderColor?: string;
 }
 
 export type Drawing =
@@ -102,7 +126,6 @@ export type Drawing =
   | MeasureDrawing
   | TextDrawing;
 
-
 export interface CoordinateConverter {
   timeToX(time: number): number | null;
   xToTime(x: number): number | null;
@@ -110,3 +133,4 @@ export interface CoordinateConverter {
   yToPrice(y: number): number | null;
   snapPoint?(x: number, y: number): Point | null;
 }
+

@@ -5,7 +5,7 @@ import { buildMarkers } from "../src/overlays/markers.ts";
 import { buildSignalMarkers } from "../src/overlays/signals.ts";
 import { barIndexAt, locate } from "../src/overlays/snap.ts";
 import { buildTrail, spanOf } from "../src/overlays/sl_tp_trail.ts";
-import { baseInterval, resample } from "../src/resample.ts";
+import { baseInterval, isResamplable, resample } from "../src/resample.ts";
 import type { Bar, Signal, Trade } from "../src/types";
 
 const T0 = 1_700_000_100, STEP = 900;
@@ -102,6 +102,33 @@ test("resample aggregates OHLCV into buckets", () => {
     { time: 0, open: 1, high: 5, low: 0.5, close: 1, volume: 6 },
     { time: 3600, open: 1, high: 2, low: 1, close: 2, volume: 4 },
   ]);
+});
+
+test("isResamplable: allows only multiples >= base interval", () => {
+  // 15m (900s) base
+  assert.equal(isResamplable(900, 900), true); // 15m
+  assert.equal(isResamplable(900, 1800), true); // 30m
+  assert.equal(isResamplable(900, 3600), true); // 1h
+  assert.equal(isResamplable(900, 14400), true); // 4h
+  assert.equal(isResamplable(900, 86400), true); // 1D
+
+  // Invalid non-multiples
+  assert.equal(isResamplable(900, 1200), false); // 20m
+  assert.equal(isResamplable(900, 300), false); // 5m (lower than base)
+  assert.equal(isResamplable(900, 600), false); // 10m (lower than base)
+  assert.equal(isResamplable(900, 720), false); // 12m
+  assert.equal(isResamplable(0, 900), false);
+  assert.equal(isResamplable(900, 0), false);
+});
+
+test("resample: preserves original bars when target timeframe is not resamplable", () => {
+  const sampleBars: Bar[] = [
+    { time: 0, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
+    { time: 900, open: 1.5, high: 3, low: 1.2, close: 2.5, volume: 20 },
+  ];
+  // 20m (1200s) is not resamplable from 15m (900s)
+  const result = resample(sampleBars, 1200, 900);
+  assert.deepEqual(result, sampleBars);
 });
 
 test("sample data: every trade produces a drawable, ordered trail", () => {

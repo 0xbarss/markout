@@ -1,5 +1,7 @@
 import { fmtSigned } from "../format.ts";
+import { applyLineDash } from "./style_utils.ts";
 import type { CoordinateConverter, MeasureDrawing } from "./types.ts";
+
 
 export function drawMeasure(
   ctx: CanvasRenderingContext2D,
@@ -24,15 +26,18 @@ export function drawMeasure(
   const durationStr = formatDuration(elapsedSec);
 
   const isUp = deltaPrice >= 0;
-  const color = isUp ? "#0ecb81" : "#f6465d";
-  const bg = isUp ? "rgba(14, 203, 129, 0.12)" : "rgba(246, 70, 93, 0.12)";
+  const color = d.color ?? (isUp ? "#0ecb81" : "#f6465d");
+  const bg = d.fillColor ?? (isUp ? "rgba(14, 203, 129, 0.12)" : "rgba(246, 70, 93, 0.12)");
+  const lineWidth = d.lineWidth ?? 1;
 
   ctx.save();
   ctx.fillStyle = bg;
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = lineWidth;
 
   ctx.fillRect(left, top, width, height);
+
+  applyLineDash(ctx, d.lineStyle);
   ctx.strokeRect(left, top, width, height);
 
   // Diagonal line
@@ -50,14 +55,16 @@ export function drawMeasure(
   const badgeX = left + Math.max(0, (width - badgeW) / 2);
   const badgeY = top + Math.max(0, (height - badgeH) / 2);
 
+  ctx.setLineDash([]);
   ctx.fillStyle = "#161b22";
   ctx.strokeStyle = color;
   ctx.beginPath();
-  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3);
+  ctx.roundRect ? ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3) : ctx.rect(badgeX, badgeY, badgeW, badgeH);
   ctx.fill();
   ctx.stroke();
 
   ctx.fillStyle = "#eaecef";
+
   ctx.fillText(info, badgeX + 6, badgeY + 14);
 
   ctx.restore();

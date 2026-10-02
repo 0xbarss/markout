@@ -1,6 +1,6 @@
 import { drawArrow } from "./arrow.ts";
 import { drawBoxZone } from "./box_zone.ts";
-import { drawFibonacci } from "./fibonacci.ts";
+import { drawFibonacci, FIB_LEVELS } from "./fibonacci.ts";
 import { drawHorizontal } from "./horizontal.ts";
 import { drawMeasure } from "./measure.ts";
 import { drawPosition } from "./position.ts";
@@ -32,6 +32,11 @@ export class DrawingManager {
   private toolListeners = new Set<(tool: DrawingTool) => void>();
   private changeListeners = new Set<(count: number) => void>();
   private selectListeners = new Set<(selected: Drawing | null) => void>();
+  private editListeners = new Set<(selected: Drawing) => void>();
+  private textPromptHandler: ((initialText: string) => Promise<string | null>) | null = null;
+  private copiedDrawingId: string | null = null;
+
+
 
   constructor(canvas: HTMLCanvasElement, conv: CoordinateConverter) {
     this.canvas = canvas;
@@ -80,12 +85,17 @@ export class DrawingManager {
 
   public selectDrawing(id: string | null): void {
     this.selectedId = id;
+    if (this.activeTool === "cursor") {
+      this.canvas.style.pointerEvents = id !== null ? "auto" : "none";
+      this.canvas.style.cursor = id !== null ? "default" : "default";
+    }
     const selected = this.getSelectedDrawing();
     for (const listener of this.selectListeners) {
       listener(selected);
     }
     this.render();
   }
+
 
   public onSelect(cb: (selected: Drawing | null) => void): () => void {
     this.selectListeners.add(cb);
@@ -101,15 +111,166 @@ export class DrawingManager {
     this.selectDrawing(drawing.id);
   }
 
-  public deleteSelected(): void {
-    if (!this.selectedId) return;
-    this.pushUndo();
-    this.drawings = this.drawings.filter((d) => d.id !== this.selectedId);
-    this.selectedId = null;
+  public onEdit(cb: (selected: Drawing) => void): () => void {
+    this.editListeners.add(cb);
+    return () => this.editListeners.delete(cb);
+  }
+
+  public openEdit(drawing: Drawing): void {
+    for (const listener of this.editListeners) {
+      listener(drawing);
+    }
+  }
+
+  public setTextPromptHandler(handler: (initialText: string) => Promise<string | null>): void {
+    this.textPromptHandler = handler;
+  }
+
+  public updateDrawing(drawing: Drawing, recordUndo = true): void {
+    const idx = this.drawings.findIndex((d) => d.id === drawing.id);
+    if (idx === -1) return;
+    if (recordUndo) {
+      this.pushUndo();
+    }
+    this.drawings[idx] = JSON.parse(JSON.stringify(drawing));
     this.saveToStorage();
     this.emitChange();
-    this.selectDrawing(null);
+    if (this.selectedId === drawing.id) {
+      const selected = this.getSelectedDrawing();
+      for (const listener of this.selectListeners) {
+        listener(selected);
+      }
+    }
+    this.render();
   }
+
+  public duplicateDrawing(id: string): Drawing | null {
+    const orig = this.drawings.find((d) => d.id === id);
+    if (!orig) return null;
+
+    const clone: Drawing = JSON.parse(JSON.stringify(orig));
+    clone.id = `d_${Date.now()}`;
+
+    // Calculate a clear visual offset in pixel space (30px right, 20px down)
+    let dt = 3600;
+    let dp = 0;
+
+    let refPt: Point | null = null;
+    if ("p1" in orig) {
+      refPt = orig.p1;
+    } else if (orig.type === "position") {
+      refPt = orig.entry;
+    } else if (orig.type === "horizontal") {
+      refPt = { time: orig.time ?? Math.floor(Date.now() / 1000), price: orig.price };
+    } else if (orig.type === "vertical") {
+      refPt = { time: orig.time, price: 0 };
+    }
+
+    if (refPt) {
+      const x = this.conv.timeToX(refPt.time);
+      const y = this.conv.priceToY(refPt.price);
+      if (x !== null && y !== null) {
+        const nextX = this.conv.xToTime(x + 30);
+        const nextY = this.conv.yToPrice(y + 20);
+        if (nextX !== null) dt = nextX - refPt.time;
+        if (nextY !== null) dp = nextY - refPt.price;
+      }
+    }
+
+    if (dp === 0) {
+      const p = (orig as any).p1?.price ?? (orig as any).price ?? (orig as any).entry?.price ?? 100;
+      dp = p * 0.01 || 1;
+    }
+
+    switch (clone.type) {
+      case "trendline":
+      case "ray":
+      case "arrow":
+      case "fibonacci":
+      case "measure":
+      case "box_zone":
+        clone.p1.time += dt;
+        clone.p1.price += dp;
+        clone.p2.time += dt;
+        clone.p2.price += dp;
+        break;
+      case "horizontal":
+        clone.price += dp;
+        if (clone.time) clone.time += dt;
+        break;
+      case "vertical":
+        clone.time += dt;
+        break;
+      case "text":
+        clone.p1.time += dt;
+        clone.p1.price += dp;
+        break;
+      case "position":
+        clone.entry.time += dt;
+        clone.entry.price += dp;
+        clone.targetPrice += dp;
+        clone.stopPrice += dp;
+        clone.endTime += dt;
+        break;
+    }
+
+    this.addDrawing(clone);
+    this.selectDrawing(clone.id);
+    return clone;
+  }
+
+
+  public deleteDrawing(id: string): void {
+    this.pushUndo();
+    this.drawings = this.drawings.filter((d) => d.id !== id);
+    if (this.selectedId === id) {
+      this.selectedId = null;
+      this.selectDrawing(null);
+    }
+    this.saveToStorage();
+    this.emitChange();
+    this.render();
+  }
+
+  public deleteSelected(): void {
+    if (!this.selectedId) return;
+    this.deleteDrawing(this.selectedId);
+  }
+
+  public getDrawingPixelBounds(d: Drawing): { minX: number; maxX: number; minY: number; maxY: number } | null {
+    if (d.type === "horizontal") {
+      const y = this.conv.priceToY(d.price);
+      if (y === null) return null;
+      const width = this.canvas.parentElement?.clientWidth ?? this.canvas.width;
+      return { minX: width * 0.35, maxX: width * 0.65, minY: y - 10, maxY: y + 10 };
+    }
+
+    if (d.type === "vertical") {
+      const x = this.conv.timeToX(d.time);
+      if (x === null) return null;
+      const height = this.canvas.parentElement?.clientHeight ?? this.canvas.height;
+      return { minX: x - 10, maxX: x + 10, minY: height * 0.35, maxY: height * 0.65 };
+    }
+
+    const pts = this.getControlPoints(d);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    let count = 0;
+    for (const p of pts) {
+      const x = this.conv.timeToX(p.time);
+      const y = this.conv.priceToY(p.price);
+      if (x !== null && y !== null) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+        count++;
+      }
+    }
+
+    if (count === 0) return null;
+    return { minX, maxX, minY, maxY };
+  }
+
 
   public undo(): void {
     const prev = this.undoStack.pop();
@@ -272,7 +433,7 @@ export class DrawingManager {
       case "box_zone":
         return { id: "preview", type: "box_zone", p1, p2 };
       case "fibonacci":
-        return { id: "preview", type: "fibonacci", p1, p2 };
+        return { id: "preview", type: "fibonacci", p1, p2, extendRight: true, extendLeft: false };
       case "position": {
         const isLong = p2.price >= p1.price;
         const delta = Math.abs(p2.price - p1.price);
@@ -314,8 +475,17 @@ export class DrawingManager {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         this.undo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d" && this.selectedId) {
+        e.preventDefault();
+        this.duplicateDrawing(this.selectedId);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && this.selectedId) {
+        this.copiedDrawingId = this.selectedId;
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && this.copiedDrawingId) {
+        e.preventDefault();
+        this.duplicateDrawing(this.copiedDrawingId);
       }
     });
+
   }
 
   private checkHandleHit(px: number, py: number): { drawingId: string; handleIdx: number } | null {
@@ -345,9 +515,9 @@ export class DrawingManager {
 
         const handleHit = this.checkHandleHit(px, py);
         const drawingHit = !handleHit && this.hitTest(px, py) !== null;
-        if (handleHit || drawingHit) {
+        if (handleHit || drawingHit || this.selectedId !== null) {
           this.canvas.style.pointerEvents = "auto";
-          this.canvas.style.cursor = handleHit ? "grab" : "pointer";
+          this.canvas.style.cursor = handleHit ? "grab" : (drawingHit ? "pointer" : "default");
         } else {
           this.canvas.style.pointerEvents = "none";
           this.canvas.style.cursor = "default";
@@ -355,11 +525,17 @@ export class DrawingManager {
       });
 
       parent.addEventListener("pointerdown", (e) => {
+        if (e.target instanceof Element && (e.target.closest(".drawing-floating-toolbar") || e.target.closest(".modal-backdrop") || e.target.closest(".modal-dialog"))) {
+          return;
+        }
         if (e.target !== this.canvas && this.selectedId) {
           this.selectDrawing(null);
         }
       });
     }
+
+    let lastPointerDownTime = 0;
+    let lastPointerDownDrawingId: string | null = null;
 
     this.canvas.addEventListener("pointerdown", (e) => {
       const pt = this.eventToPoint(e);
@@ -370,8 +546,22 @@ export class DrawingManager {
         const px = e.clientX - rect.left;
         const py = e.clientY - rect.top;
 
-        // Check if clicked on a selected drawing's control handle
+        const hit = this.hitTest(px, py);
         const handleHit = this.checkHandleHit(px, py);
+
+        // Check double click directly
+        const now = Date.now();
+        if (hit && (hit.id === lastPointerDownDrawingId || hit.id === this.selectedId) && (now - lastPointerDownTime) < 400) {
+          lastPointerDownTime = 0;
+          lastPointerDownDrawingId = null;
+          this.selectDrawing(hit.id);
+          this.openEdit(hit);
+          return;
+        }
+        lastPointerDownTime = now;
+        lastPointerDownDrawingId = hit ? hit.id : null;
+
+        // Check if clicked on a selected drawing's control handle
         if (handleHit) {
           this.pushUndo();
           this.draggingHandle = handleHit;
@@ -380,7 +570,6 @@ export class DrawingManager {
         }
 
         // Check hit testing on drawings
-        const hit = this.hitTest(px, py);
         if (hit) {
           this.pushUndo();
           this.selectDrawing(hit.id);
@@ -388,10 +577,10 @@ export class DrawingManager {
           try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
         } else {
           this.selectDrawing(null);
-          this.canvas.style.pointerEvents = "none";
         }
         return;
       }
+
 
       // Single-click placement tools
       if (this.activeTool === "horizontal") {
@@ -416,18 +605,26 @@ export class DrawingManager {
       }
 
       if (this.activeTool === "text") {
-        const text = (typeof window !== "undefined" && typeof window.prompt === "function")
-          ? window.prompt("Annotation note:", "Note")
-          : "Note";
-        if (text && text.trim().length > 0) {
-          this.addDrawing({
-            id: `t_${Date.now()}`,
-            type: "text",
-            p1: pt,
-            text: text.trim(),
-          });
+        const onGotText = (text: string | null) => {
+          if (text && text.trim().length > 0) {
+            this.addDrawing({
+              id: `t_${Date.now()}`,
+              type: "text",
+              p1: pt,
+              text: text.trim(),
+            });
+          }
+          this.setTool("cursor");
+        };
+
+        if (this.textPromptHandler) {
+          this.textPromptHandler("Note").then(onGotText);
+        } else {
+          const text = (typeof window !== "undefined" && typeof window.prompt === "function")
+            ? window.prompt("Annotation note:", "Note")
+            : "Note";
+          onGotText(text);
         }
-        this.setTool("cursor");
         return;
       }
 
@@ -445,6 +642,33 @@ export class DrawingManager {
         this.setTool("cursor");
       }
     });
+
+    this.canvas.addEventListener("dblclick", (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const hit = this.hitTest(px, py);
+      if (hit) {
+        this.selectDrawing(hit.id);
+        this.openEdit(hit);
+      } else if (this.selectedId) {
+        const selected = this.getSelectedDrawing();
+        if (selected) this.openEdit(selected);
+      }
+    });
+
+    this.canvas.addEventListener("contextmenu", (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const hit = this.hitTest(px, py);
+      if (hit) {
+        e.preventDefault();
+        this.selectDrawing(hit.id);
+        this.openEdit(hit);
+      }
+    });
+
 
     this.canvas.addEventListener("pointermove", (e) => {
       const pt = this.eventToPoint(e);
@@ -469,8 +693,8 @@ export class DrawingManager {
         const py = e.clientY - rect.top;
         const hitHandle = this.checkHandleHit(px, py);
         const hitDrawing = !hitHandle && this.hitTest(px, py) !== null;
-        if (hitHandle || hitDrawing) {
-          this.canvas.style.cursor = hitHandle ? "grab" : "pointer";
+        if (hitHandle || hitDrawing || this.selectedId !== null) {
+          this.canvas.style.cursor = hitHandle ? "grab" : (hitDrawing ? "pointer" : "default");
         } else {
           this.canvas.style.pointerEvents = "none";
           this.canvas.style.cursor = "default";
@@ -490,11 +714,12 @@ export class DrawingManager {
         this.saveToStorage();
         this.draggingHandle = null;
         this.draggingDrawing = null;
-        if (this.activeTool === "cursor") {
+        if (this.activeTool === "cursor" && !this.selectedId) {
           this.canvas.style.pointerEvents = "none";
         }
       }
     };
+
 
     this.canvas.addEventListener("pointerup", finishDrag);
     this.canvas.addEventListener("pointercancel", finishDrag);
@@ -516,8 +741,16 @@ export class DrawingManager {
       case "box_zone":
         if (handleIdx === 0) d.p1 = pt;
         else if (handleIdx === 1) d.p2 = pt;
+        else if (handleIdx === 2) { d.p1.time = pt.time; d.p2.price = pt.price; }
+        else if (handleIdx === 3) { d.p2.time = pt.time; d.p1.price = pt.price; }
+        break;
+      case "position":
+        if (handleIdx === 0) d.entry = pt;
+        else if (handleIdx === 1) { d.endTime = pt.time; d.targetPrice = pt.price; }
+        else if (handleIdx === 2) { d.endTime = pt.time; d.stopPrice = pt.price; }
         break;
       case "horizontal":
+
         d.price = pt.price;
         d.time = pt.time;
         break;
@@ -590,7 +823,6 @@ export class DrawingManager {
       case "trendline":
       case "ray":
       case "arrow":
-      case "fibonacci":
       case "measure": {
         const x1 = this.conv.timeToX(d.p1.time);
         const y1 = this.conv.priceToY(d.p1.price);
@@ -598,6 +830,32 @@ export class DrawingManager {
         const y2 = this.conv.priceToY(d.p2.price);
         if (x1 === null || y1 === null || x2 === null || y2 === null) return false;
         return this.distToSegment(px, py, x1, y1, x2, y2) <= tol;
+      }
+      case "fibonacci": {
+        const x1 = this.conv.timeToX(d.p1.time);
+        const y1 = this.conv.priceToY(d.p1.price);
+        const x2 = this.conv.timeToX(d.p2.time);
+        const y2 = this.conv.priceToY(d.p2.price);
+        if (x1 === null || y1 === null || x2 === null || y2 === null) return false;
+        if (this.distToSegment(px, py, x1, y1, x2, y2) <= tol) return true;
+
+        const minX = Math.min(x1, x2);
+        const maxX = Math.max(x1, x2);
+        const width = this.canvas.parentElement?.clientWidth ?? this.canvas.width;
+        const left = (d.extendLeft || d.extendLines) ? 0 : minX;
+        const right = (d.extendRight || d.extendLines) ? width : maxX;
+
+        if (px >= left - tol && px <= right + tol) {
+          const diff = d.p2.price - d.p1.price;
+          for (const lvl of FIB_LEVELS) {
+            const price = d.p1.price + diff * lvl.ratio;
+            const y = this.conv.priceToY(price);
+            if (y !== null && Math.abs(py - y) <= tol) {
+              return true;
+            }
+          }
+        }
+        return false;
       }
       case "box_zone": {
         const x1 = this.conv.timeToX(d.p1.time);

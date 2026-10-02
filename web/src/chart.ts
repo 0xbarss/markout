@@ -10,6 +10,8 @@ import { buildSignalMarkers } from "./overlays/signals";
 import { barIndexAt, locate } from "./overlays/snap.ts";
 import { buildTrail, type TrailPoint } from "./overlays/sl_tp_trail";
 import type { Bar, Signal, Trade } from "./types";
+import { DrawingFloatingToolbar } from "./ui/drawing_toolbar.ts";
+
 
 const UP = "#0ecb81", DOWN = "#f6465d";
 
@@ -32,7 +34,12 @@ export interface TerminalChart {
   focus(from: number, to: number): void;
   onCrosshair(cb: (ohlc: Ohlc | null) => void): void;
   drawings: DrawingManager;
+  setAutoScale(auto: boolean): void;
+  isAutoScale(): boolean;
+  onAutoScaleChange(cb: (auto: boolean) => void): () => void;
 }
+
+
 
 export function createTerminalChart(container: HTMLElement): TerminalChart {
   const chart = createChart(container, {
@@ -40,9 +47,10 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
     layout: { background: { type: ColorType.Solid, color: "#0b0e11" }, textColor: "#848e9c" },
     grid: { vertLines: { color: "#1e222d" }, horzLines: { color: "#1e222d" } },
     crosshair: { mode: CrosshairMode.Normal },
-    rightPriceScale: { borderColor: "#262932" },
+    rightPriceScale: { borderColor: "#262932", autoScale: false },
     timeScale: { borderColor: "#262932", timeVisible: true, secondsVisible: false },
   });
+
 
   const candles = chart.addCandlestickSeries({
     upColor: UP, downColor: DOWN, borderVisible: false, wickUpColor: UP, wickDownColor: DOWN,
@@ -129,13 +137,85 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
   };
 
   const drawings = new DrawingManager(drawingCanvas, conv);
-  chart.timeScale().subscribeVisibleLogicalRangeChange(() => drawings.render());
-  chart.timeScale().subscribeVisibleTimeRangeChange(() => drawings.render());
-  window.addEventListener("resize", () => drawings.resize());
-  requestAnimationFrame(() => drawings.resize());
+  const floatingToolbar = new DrawingFloatingToolbar(container, drawings);
+
+  // Auto scale (fits data to screen) under price column
+  const axisCorner = document.createElement("div");
+  axisCorner.className = "chart-axis-corner";
+  const autoBtn = document.createElement("button");
+  autoBtn.type = "button";
+  autoBtn.className = "chart-auto-btn";
+  autoBtn.title = "Auto (fits data to screen) [Alt+A]";
+  autoBtn.textContent = "auto";
+  axisCorner.appendChild(autoBtn);
+  container.appendChild(axisCorner);
+
+  let autoScale = false; // default to non-Auto
+  let hasInitializedScale = false;
+  const autoScaleListeners = new Set<(auto: boolean) => void>();
+
+  const updateAutoBtn = () => {
+    autoBtn.classList.toggle("active", autoScale);
+  };
+  updateAutoBtn();
+
+  const setAutoScale = (enabled: boolean) => {
+    autoScale = enabled;
+    chart.priceScale("right").applyOptions({ autoScale: enabled });
+    updateAutoBtn();
+    for (const cb of autoScaleListeners) {
+      cb(autoScale);
+    }
+  };
+
+  autoBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setAutoScale(!autoScale);
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.altKey && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      setAutoScale(!autoScale);
+    }
+  });
+
+
+  chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+    drawings.render();
+    floatingToolbar.updatePosition();
+    const opts = chart.priceScale("right").options();
+    if (opts.autoScale !== undefined && opts.autoScale !== autoScale) {
+      autoScale = opts.autoScale;
+      updateAutoBtn();
+      for (const cb of autoScaleListeners) {
+        cb(autoScale);
+      }
+    }
+  });
+  chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+    drawings.render();
+    floatingToolbar.updatePosition();
+  });
+  window.addEventListener("resize", () => {
+    drawings.resize();
+    floatingToolbar.updatePosition();
+  });
+  requestAnimationFrame(() => {
+    drawings.resize();
+    floatingToolbar.updatePosition();
+  });
 
   return {
     drawings,
+    setAutoScale,
+    isAutoScale: () => autoScale,
+    onAutoScaleChange(cb: (auto: boolean) => void) {
+      autoScaleListeners.add(cb);
+      cb(autoScale);
+      return () => autoScaleListeners.delete(cb);
+    },
+
     setBars(bars, fit = false) {
       currentBars = bars;
       if (bars.length > 0) {
@@ -149,13 +229,31 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
         time: b.time as UTCTimestamp, value: b.volume,
         color: b.close >= b.open ? "rgba(14,203,129,0.4)" : "rgba(246,70,93,0.4)",
       })));
-      if (fit) chart.timeScale().fitContent();
+
+      if (!hasInitializedScale && bars.length > 0) {
+        chart.priceScale("right").applyOptions({ autoScale: true });
+        if (fit) chart.timeScale().fitContent();
+        if (!autoScale) {
+          requestAnimationFrame(() => {
+            if (!autoScale) {
+              chart.priceScale("right").applyOptions({ autoScale: false });
+            }
+          });
+        }
+        hasInitializedScale = true;
+      } else {
+        if (fit) chart.timeScale().fitContent();
+      }
       drawings.render();
     },
 
     fit() {
       chart.timeScale().fitContent();
+      if (autoScale) {
+        chart.priceScale("right").applyOptions({ autoScale: true });
+      }
     },
+
 
     setTrades(trades, bars) {
       lastTrades = trades;
