@@ -1,7 +1,8 @@
 [package]
 name = "markout"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
+authors = ["0xbarss"]
 description = "Interactive financial time-series visualizer, session replay engine and live trading monitor"
 license = "MIT"
 
