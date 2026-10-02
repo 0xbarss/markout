@@ -337,7 +337,7 @@ Add `markout` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-markout = { path = "../markout" }
+markout = "1.0"
 tokio = { version = "1", features = ["full"] }
 ```
 

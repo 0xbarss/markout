@@ -5,6 +5,20 @@ edition = "2021"
 authors = ["0xbarss"]
 description = "Interactive financial time-series visualizer, session replay engine and live trading monitor"
 license = "MIT"
+repository = "https://github.com/0xbarss/markout"
+homepage = "https://github.com/0xbarss/markout"
+readme = "README.md"
+keywords = ["trading", "visualizer", "replay", "timeseries", "parquet"]
+categories = ["visualization", "command-line-utilities", "development-tools"]
+include = [
+    "src/**/*",
+    "web/dist/**/*",
+    "examples/**/*",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
+    "CONTRIBUTING.md",
+]
 
 [lib]
 name = "markout"
