@@ -1,4 +1,4 @@
-import type { Bar, MarketEvent, Stats, Trade } from "./types.ts";
+import type { Bar, MarketEvent, Signal, Stats, Trade } from "./types.ts";
 
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -6,11 +6,12 @@ async function getJSON<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function loadAll(): Promise<[Bar[], Trade[], Stats]> {
+export function loadAll(): Promise<[Bar[], Trade[], Stats, Signal[]]> {
   return Promise.all([
     getJSON<Bar[]>("/api/v1/bars"),
     getJSON<Trade[]>("/api/v1/trades"),
     getJSON<Stats>("/api/v1/stats"),
+    getJSON<Signal[]>("/api/v1/signals").catch(() => []),
   ]);
 }
 

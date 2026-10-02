@@ -13,13 +13,17 @@ pub struct Cli {
     #[arg(long, global = true, default_value_t = 8080)]
     pub port: u16,
 
-    /// Trades database (offline review).
-    #[arg(long)]
-    pub db: Option<PathBuf>,
+    /// Trades database or log file (offline review).
+    #[arg(long, alias = "db")]
+    pub trades: Option<PathBuf>,
 
     /// Bars file or directory (offline review).
     #[arg(long)]
     pub bars: Option<PathBuf>,
+
+    /// Strategy signals file (offline review).
+    #[arg(long)]
+    pub strategy: Option<PathBuf>,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -46,8 +50,9 @@ pub struct LiveArgs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
     Offline {
-        db: Option<PathBuf>,
+        trades: Option<PathBuf>,
         bars: Option<PathBuf>,
+        strategy: Option<PathBuf>,
     },
     Live {
         feed: Option<String>,
@@ -82,8 +87,9 @@ impl From<Cli> for Config {
                 tf: l.tf,
             },
             None => Mode::Offline {
-                db: cli.db,
+                trades: cli.trades,
                 bars: cli.bars,
+                strategy: cli.strategy,
             },
         };
         Config {
@@ -106,13 +112,32 @@ mod tests {
 
     #[test]
     fn default_is_offline() {
-        let c = parse(&["--db", "t.sqlite", "--bars", "./bars"]);
+        let c = parse(&[
+            "--trades",
+            "t.sqlite",
+            "--bars",
+            "./bars",
+            "--strategy",
+            "./signals.jsonl",
+        ]);
         assert_eq!(c.port, 8080);
         assert_eq!(
             c.mode,
             Mode::Offline {
-                db: Some("t.sqlite".into()),
-                bars: Some("./bars".into())
+                trades: Some("t.sqlite".into()),
+                bars: Some("./bars".into()),
+                strategy: Some("./signals.jsonl".into()),
+            }
+        );
+
+        // Verify --db alias works as well
+        let c_alias = parse(&["--db", "t.sqlite", "--bars", "./bars"]);
+        assert_eq!(
+            c_alias.mode,
+            Mode::Offline {
+                trades: Some("t.sqlite".into()),
+                bars: Some("./bars".into()),
+                strategy: None,
             }
         );
     }

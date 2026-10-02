@@ -1,4 +1,4 @@
-import type { Bar, Trade } from "../types.ts";
+import type { Bar, Signal, Trade } from "../types.ts";
 import { clipTradesForReplay } from "./ghost.ts";
 
 export const SUPPORTED_SPEEDS = [1, 2, 5, 10, 20, 50, 100] as const;
@@ -9,6 +9,7 @@ export interface ReplayFrame {
   total: number;
   visibleBars: Bar[];
   visibleTrades: Trade[];
+  visibleSignals: Signal[];
   isLive: boolean;
 }
 
@@ -26,6 +27,7 @@ export type StateListener = (state: ReplayState) => void;
 export class ReplayController {
   private bars: Bar[] = [];
   private trades: Trade[] = [];
+  private signals: Signal[] = [];
   private cursor = 0;
   private isPlaying = false;
   private speed: ReplaySpeed = 1;
@@ -33,16 +35,28 @@ export class ReplayController {
   private frameListeners = new Set<FrameListener>();
   private stateListeners = new Set<StateListener>();
 
-  constructor(bars: Bar[] = [], trades: Trade[] = []) {
-    this.setData(bars, trades);
+  constructor(bars: Bar[] = [], trades: Trade[] = [], signals: Signal[] = []) {
+    this.setData(bars, trades, signals);
   }
 
-  public setData(bars: Bar[], trades: Trade[]): void {
+  public setData(bars: Bar[], trades: Trade[], signals: Signal[] = this.signals): void {
     this.bars = bars;
     this.trades = trades;
+    this.signals = signals;
     this.cursor = Math.max(0, bars.length - 1);
     this.emitState();
     this.emitFrame();
+  }
+
+  public setSignals(signals: Signal[]): void {
+    this.signals = signals;
+    this.emitFrame();
+  }
+
+  public getVisibleSignals(): Signal[] {
+    const b = this.bars[this.cursor];
+    if (!b) return [];
+    return this.signals.filter((s) => s.time <= b.time);
   }
 
   public appendOrUpdateBar(bar: Bar): void {
@@ -274,6 +288,7 @@ export class ReplayController {
       total: this.bars.length,
       visibleBars: this.getVisibleBars(),
       visibleTrades: this.getVisibleTrades(),
+      visibleSignals: this.getVisibleSignals(),
       isLive: this.isLive(),
     };
   }

@@ -21,13 +21,18 @@ pub use ingestion::Dataset;
 /// Resolves on Ctrl-C.
 pub async fn serve(config: Config, bus: EventBus) -> anyhow::Result<()> {
     let data = match &config.mode {
-        Mode::Offline { db, bars } => Dataset::load(db.as_deref(), bars.as_deref())?,
+        Mode::Offline {
+            trades,
+            bars,
+            strategy,
+        } => Dataset::load(trades.as_deref(), bars.as_deref(), strategy.as_deref())?,
         Mode::Live { .. } => Dataset::default(),
     };
     tracing::info!(
-        "loaded {} bars, {} trades",
+        "loaded {} bars, {} trades, {} strategy signals",
         data.bars.len(),
-        data.trades.len()
+        data.trades.len(),
+        data.signals.len()
     );
     server::run(config, bus, data).await
 }

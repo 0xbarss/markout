@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildMarkers } from "../src/overlays/markers.ts";
+import { buildSignalMarkers } from "../src/overlays/signals.ts";
 import { barIndexAt, locate } from "../src/overlays/snap.ts";
 import { buildTrail, spanOf } from "../src/overlays/sl_tp_trail.ts";
 import { baseInterval, resample } from "../src/resample.ts";
-import type { Bar, Trade } from "../src/types";
+import type { Bar, Signal, Trade } from "../src/types";
 
 const T0 = 1_700_000_100, STEP = 900;
 const bars: Bar[] = Array.from({ length: 20 }, (_, i) => ({
@@ -115,4 +116,44 @@ test("sample data: every trade produces a drawable, ordered trail", () => {
   assert.ok(sl.length >= 1 && tp.length >= 1);
   for (const lane of [...sl, ...tp]) for (let i = 1; i < lane.length; i++) assert.ok(lane[i].time > lane[i - 1].time);
   assert.equal(buildMarkers(trades, sample).length, trades.length * 2);
+});
+
+test("strategy signals: visual markers for buy and sell, omit hold", () => {
+  const sigs: Signal[] = [
+    {
+      id: "sig_1",
+      time: at(2),
+      direction: "buy",
+      entry_price: 100.5,
+      stop_loss: 98.0,
+      take_profit: 105.0,
+      strategy: "Cayenne",
+    },
+    {
+      id: "sig_2",
+      time: at(5),
+      direction: "sell",
+      entry_price: 103.0,
+      stop_loss: 105.0,
+      take_profit: 100.0,
+      strategy: "Eclipse",
+    },
+    {
+      id: "sig_3",
+      time: at(7),
+      direction: "hold",
+      entry_price: 0,
+      stop_loss: 0,
+      take_profit: 0,
+    },
+  ];
+  const markers = buildSignalMarkers(sigs, bars);
+  assert.equal(markers.length, 2);
+  assert.equal(markers[0].position, "belowBar");
+  assert.equal(markers[0].shape, "arrowUp");
+  assert.ok((markers[0].text as string).includes("Cayenne Buy @ 100.50"));
+
+  assert.equal(markers[1].position, "aboveBar");
+  assert.equal(markers[1].shape, "arrowDown");
+  assert.ok((markers[1].text as string).includes("Eclipse Sell @ 103.00"));
 });

@@ -49,10 +49,25 @@ export interface AccountSnapshot {
   equity: number;
 }
 
+export type Direction = "buy" | "sell" | "hold";
+
+export interface Signal {
+  id: string;
+  time: number;
+  symbol?: string;
+  direction: Direction;
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  strategy?: string;
+  comment?: string;
+}
+
 export type MarketEvent =
   | { type: "bar"; data: Bar }
   | { type: "tick"; data: Tick }
   | { type: "trade"; data: TradeUpdate }
+  | { type: "signal"; data: Signal }
   | { type: "risk_bracket"; data: RiskBracketEvent }
   | { type: "account"; data: AccountSnapshot };
 

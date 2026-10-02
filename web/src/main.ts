@@ -46,7 +46,7 @@ function dominantSymbol(trades: Trade[]): string {
 }
 
 async function main(): Promise<void> {
-  const [initialBars, initialTrades, initialStats] = await loadAll();
+  const [initialBars, initialTrades, initialStats, initialSignals] = await loadAll();
   const chart = createTerminalChart($("chart"));
   const replay = new ReplayController();
   mountReplayBar(replay);
@@ -59,41 +59,75 @@ async function main(): Promise<void> {
   let bars = initialBars;
   let trades = initialTrades;
   let stats = initialStats;
+  let signals = initialSignals;
   let symbol = dominantSymbol(trades);
+  if (symbol === "—" && signals.length > 0 && signals[0].symbol) {
+    symbol = signals[0].symbol;
+  }
   let overlayTrades = trades.filter((t) => t.symbol === symbol);
+  let overlaySignals = signals.filter((s) => !s.symbol || s.symbol === symbol || symbol === "—");
   let view: Bar[] = bars;
 
   renderSymbol(symbol);
   renderHeaderStats(stats);
   renderStats(stats);
 
-  const ledger = mountLedger(trades, (t) => {
-    if (!t) {
-      chart.setSelectedTrade(null);
-      return;
+  const sigBtn = document.getElementById("signals-toggle-btn");
+  if (sigBtn) {
+    if (signals.length > 0) {
+      sigBtn.hidden = false;
+      let sigVis = true;
+      sigBtn.addEventListener("click", () => {
+        sigVis = !sigVis;
+        sigBtn.classList.toggle("active", sigVis);
+        chart.setSignalsVisible(sigVis);
+      });
+    } else {
+      sigBtn.hidden = true;
     }
-    chart.setSelectedTrade(t.id);
-    const span = t.symbol === symbol ? spanOf(t, view) : null;
-    if (!span) return;
-    const pad = Math.max(20, Math.round((span[1] - span[0]) * 0.5));
-    chart.focus(span[0] - pad, span[1] + pad);
-    $("chart").scrollIntoView({ block: "nearest", behavior: "smooth" });
-  });
+  }
+
+  const ledger = mountLedger(
+    trades,
+    (t) => {
+      if (!t) {
+        chart.setSelectedTrade(null);
+        return;
+      }
+      chart.setSelectedTrade(t.id);
+      const span = t.symbol === symbol ? spanOf(t, view) : null;
+      if (!span) return;
+      const pad = Math.max(20, Math.round((span[1] - span[0]) * 0.5));
+      chart.focus(span[0] - pad, span[1] + pad);
+      $("chart").scrollIntoView({ block: "nearest", behavior: "smooth" });
+    },
+    signals,
+    (s) => {
+      if (!s) {
+        chart.setSelectedSignal(null);
+        return;
+      }
+      chart.setSelectedSignal(s.id);
+      const bi = view.findIndex((b) => b.time >= s.time);
+      if (bi >= 0) {
+        chart.focus(Math.max(0, bi - 20), Math.min(view.length - 1, bi + 20));
+      }
+    },
+  );
 
   replay.onFrame((frame) => {
     chart.setBars(frame.visibleBars, false);
     chart.setTrades(frame.visibleTrades, frame.visibleBars);
+    chart.setSignals(frame.visibleSignals, frame.visibleBars);
     renderTicker(frame.visibleBars);
     renderLegend(null, frame.visibleBars[frame.visibleBars.length - 1]);
   });
-
-
 
   let base = baseInterval(bars);
   let active = TIMEFRAMES.find((t) => t.sec >= base)?.sec ?? 0;
   const apply = () => {
     view = active === base || base === 0 ? bars : resample(bars, active);
-    replay.setData(view, overlayTrades);
+    replay.setData(view, overlayTrades, overlaySignals);
     chart.fit();
     chart.drawings.setContext(symbol, active);
     renderTimeframes(base, active, (sec) => { active = sec; apply(); });
@@ -196,6 +230,15 @@ async function main(): Promise<void> {
       }
       case "account": {
         renderAccount(event.data);
+        break;
+      }
+      case "signal": {
+        const s = event.data;
+        signals.push(s);
+        overlaySignals = signals.filter((x) => !x.symbol || x.symbol === symbol || symbol === "—");
+        replay.setSignals(overlaySignals);
+        ledger.update(trades, signals);
+        if (sigBtn) sigBtn.hidden = false;
         break;
       }
     }

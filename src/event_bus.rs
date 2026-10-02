@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
-use crate::models::{AccountSnapshot, Bar, Tick, TradeUpdate};
+use crate::models::{AccountSnapshot, Bar, Signal, Tick, TradeUpdate};
 
 /// The universal ingestion contract. Every producer maps its data to this type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -13,6 +13,8 @@ pub enum MarketEvent {
     Tick(Tick),
     /// Trade lifecycle update.
     Trade(TradeUpdate),
+    /// Strategy signal emitted.
+    Signal(Signal),
     /// Dynamic risk bracket change (trailing stop moved, TP adjusted, ...).
     RiskBracket {
         trade_id: u64,

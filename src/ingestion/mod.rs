@@ -5,10 +5,11 @@
 
 use std::path::Path;
 
-use crate::models::{Bar, StopPoint, Trade};
+use crate::models::{Bar, Signal, StopPoint, Trade};
 
 pub mod json;
 pub mod ohlcv;
+pub mod signal;
 pub mod sqlite;
 
 #[derive(Debug, thiserror::Error)]
@@ -165,25 +166,31 @@ pub fn finish_trades(mut trades: Vec<Trade>) -> Result<Vec<Trade>> {
 pub struct Dataset {
     pub bars: Vec<Bar>,
     pub trades: Vec<Trade>,
+    pub signals: Vec<Signal>,
 }
 
 impl Dataset {
-    /// Load trades from `db` (SQLite, `.jsonl`/`.ndjson`, `.json` or `.csv`) and bars
-    /// from `bars` (CSV file, directory of CSVs, or SQLite). With a SQLite `db` and no
-    /// `bars` path, a `bars` table inside the database is used when present.
-    pub fn load(db: Option<&Path>, bars: Option<&Path>) -> Result<Self> {
+    /// Load trades from `trades` path, bars from `bars` path, and signals from `strategy` path.
+    pub fn load(
+        trades: Option<&Path>,
+        bars: Option<&Path>,
+        strategy: Option<&Path>,
+    ) -> Result<Self> {
         let mut ds = Dataset::default();
-        if let Some(p) = db {
+        if let Some(p) = trades {
             ds.trades = load_trades(p)?;
         }
-        match (bars, db) {
+        if let Some(p) = strategy {
+            ds.signals = signal::load(p)?;
+        }
+        match (bars, trades) {
             (Some(p), _) => ds.bars = ohlcv::load(p)?,
             (None, Some(p)) if !json::is_text_format(p) => {
                 ds.bars = sqlite::load_bars_if_present(p)?
             }
             _ => {}
         }
-        if ds.bars.is_empty() && bars.is_none() && db.is_none() {
+        if ds.bars.is_empty() && bars.is_none() && trades.is_none() {
             let default_bars = Path::new("examples/bars.csv");
             let default_trades = Path::new("examples/trades.jsonl");
             if default_bars.exists() {

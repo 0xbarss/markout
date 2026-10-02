@@ -19,7 +19,7 @@ use crate::{
     config::Config,
     event_bus::{EventBus, MarketEvent},
     ingestion::Dataset,
-    models::{Bar, Trade},
+    models::{Bar, Signal, Trade},
     stats::{self, Stats},
 };
 
@@ -40,6 +40,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/health", get(health))
         .route("/api/v1/bars", get(get_bars))
         .route("/api/v1/trades", get(get_trades))
+        .route("/api/v1/signals", get(get_signals))
         .route("/api/v1/stats", get(get_stats))
         .route("/ws/stream", get(ws_stream))
         .fallback(static_handler)
@@ -80,6 +81,10 @@ async fn get_bars(State(state): State<AppState>) -> Json<Vec<Bar>> {
 
 async fn get_trades(State(state): State<AppState>) -> Json<Vec<Trade>> {
     Json(state.data.trades.clone())
+}
+
+async fn get_signals(State(state): State<AppState>) -> Json<Vec<Signal>> {
+    Json(state.data.signals.clone())
 }
 
 async fn get_stats(State(state): State<AppState>) -> Json<Stats> {
@@ -189,6 +194,7 @@ mod tests {
         let res = app_with(Dataset {
             bars: vec![bar],
             trades: vec![],
+            signals: vec![],
         })
         .oneshot(
             Request::builder()
@@ -204,6 +210,41 @@ mod tests {
             .unwrap();
         let bars: Vec<Bar> = serde_json::from_slice(&body).unwrap();
         assert_eq!(bars, vec![bar]);
+    }
+
+    #[tokio::test]
+    async fn signals_endpoint_serves_loaded_data() {
+        use crate::models::Direction;
+        let sig = Signal {
+            id: "sig_1".into(),
+            time: 1_700_000_000,
+            symbol: Some("BTCUSDT".into()),
+            direction: Direction::Buy,
+            entry_price: 50000.0,
+            stop_loss: 49000.0,
+            take_profit: 52000.0,
+            strategy: Some("Cayenne".into()),
+            comment: None,
+        };
+        let res = app_with(Dataset {
+            bars: vec![],
+            trades: vec![],
+            signals: vec![sig.clone()],
+        })
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/signals")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let signals: Vec<Signal> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(signals, vec![sig]);
     }
 
     #[tokio::test]

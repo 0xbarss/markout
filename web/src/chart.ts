@@ -6,9 +6,10 @@ import { DrawingManager } from "./drawings/manager.ts";
 import type { CoordinateConverter } from "./drawings/types.ts";
 import { precisionFor } from "./format";
 import { buildMarkers } from "./overlays/markers";
+import { buildSignalMarkers } from "./overlays/signals";
 import { barIndexAt, locate } from "./overlays/snap.ts";
 import { buildTrail, type TrailPoint } from "./overlays/sl_tp_trail";
-import type { Bar, Trade } from "./types";
+import type { Bar, Signal, Trade } from "./types";
 
 const UP = "#0ecb81", DOWN = "#f6465d";
 
@@ -23,6 +24,10 @@ export interface TerminalChart {
   setTrades(trades: Trade[], bars: Bar[]): void;
   setTradeOverlayMode(mode: TradeOverlayMode): void;
   setSelectedTrade(tradeId: number | null): void;
+  /** Strategy signals display */
+  setSignals(signals: Signal[], bars: Bar[]): void;
+  setSignalsVisible(visible: boolean): void;
+  setSelectedSignal(signalId: string | null): void;
   /** Show bar indices [from, to] (relative to the bars passed to setBars). */
   focus(from: number, to: number): void;
   onCrosshair(cb: (ohlc: Ohlc | null) => void): void;
@@ -60,6 +65,16 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
     priceLineVisible: false,
     crosshairMarkerVisible: false,
   });
+  const signalSlLine = chart.addLineSeries({
+    ...lineOpts,
+    color: DOWN,
+    lineStyle: LineStyle.Dashed,
+  });
+  const signalTpLine = chart.addLineSeries({
+    ...lineOpts,
+    color: UP,
+    lineStyle: LineStyle.Dotted,
+  });
   const toData = (pts: TrailPoint[]): (LineData | WhitespaceData)[] =>
     pts.map((p) => p.value === undefined
       ? { time: p.time as UTCTimestamp }
@@ -76,8 +91,11 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
 
   let currentBars: Bar[] = [];
   let lastTrades: Trade[] = [];
+  let lastSignals: Signal[] = [];
+  let signalsVisible: boolean = true;
   let currentOverlayMode: TradeOverlayMode = "focus";
   let currentSelectedTradeId: number | null = null;
+  let currentSelectedSignalId: string | null = null;
   const conv: CoordinateConverter = {
     timeToX: (t) => chart.timeScale().timeToCoordinate(t as UTCTimestamp),
     xToTime: (x) => chart.timeScale().coordinateToTime(x as any) as number | null,
@@ -155,6 +173,22 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       updateTradeOverlays();
     },
 
+    setSignals(signals, bars) {
+      lastSignals = signals;
+      currentBars = bars;
+      updateTradeOverlays();
+    },
+
+    setSignalsVisible(visible) {
+      signalsVisible = visible;
+      updateTradeOverlays();
+    },
+
+    setSelectedSignal(signalId) {
+      currentSelectedSignalId = signalId;
+      updateTradeOverlays();
+    },
+
     focus(from, to) {
       chart.timeScale().setVisibleLogicalRange({ from, to });
     },
@@ -167,15 +201,23 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
   };
 
   function updateTradeOverlays(): void {
-    if (currentOverlayMode === "off" || currentBars.length === 0) {
+    if (currentBars.length === 0) {
       candles.setMarkers([]);
       tradeConnector.setData([]);
+      signalSlLine.setData([]);
+      signalTpLine.setData([]);
       sync(slLanes, [], makeSl);
       sync(tpLanes, [], makeTp);
       return;
     }
 
-    if (currentOverlayMode === "focus") {
+    let tradeMarkers: ReturnType<typeof buildMarkers> = [];
+
+    if (currentOverlayMode === "off") {
+      tradeConnector.setData([]);
+      sync(slLanes, [], makeSl);
+      sync(tpLanes, [], makeTp);
+    } else if (currentOverlayMode === "focus") {
       let focused: Trade[] = [];
       if (currentSelectedTradeId !== null) {
         const found = lastTrades.find((t) => t.id === currentSelectedTradeId);
@@ -185,7 +227,7 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
         focused = lastTrades.filter((t) => t.exit_time === null);
       }
 
-      candles.setMarkers(buildMarkers(focused, currentBars, false, currentSelectedTradeId));
+      tradeMarkers = buildMarkers(focused, currentBars, false, currentSelectedTradeId);
       const trail = buildTrail(focused, currentBars);
       sync(slLanes, trail.sl, makeSl);
       sync(tpLanes, trail.tp, makeTp);
@@ -213,14 +255,58 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       } else {
         tradeConnector.setData([]);
       }
-      return;
+    } else {
+      // "all" mode
+      tradeConnector.setData([]);
+      tradeMarkers = buildMarkers(lastTrades, currentBars, true, currentSelectedTradeId);
+      const trail = buildTrail(lastTrades, currentBars);
+      sync(slLanes, trail.sl, makeSl);
+      sync(tpLanes, trail.tp, makeTp);
     }
 
-    // "all" mode
-    tradeConnector.setData([]);
-    candles.setMarkers(buildMarkers(lastTrades, currentBars, true, currentSelectedTradeId));
-    const trail = buildTrail(lastTrades, currentBars);
-    sync(slLanes, trail.sl, makeSl);
-    sync(tpLanes, trail.tp, makeTp);
+    // Signals markers
+    const signalMarkers = (signalsVisible && lastSignals.length > 0)
+      ? buildSignalMarkers(lastSignals, currentBars, false, currentSelectedSignalId)
+      : [];
+
+    const allMarkers = [...tradeMarkers, ...signalMarkers].sort(
+      (a, b) => (a.time as number) - (b.time as number),
+    );
+    candles.setMarkers(allMarkers);
+
+    // Selected signal bracket lines
+    if (signalsVisible && currentSelectedSignalId !== null) {
+      const sig = lastSignals.find((s) => s.id === currentSelectedSignalId);
+      if (sig) {
+        const bi = locate(currentBars, sig.time);
+        if (bi >= 0) {
+          const endIdx = Math.min(currentBars.length - 1, bi + 15);
+          const t1 = currentBars[bi].time as UTCTimestamp;
+          const t2 = currentBars[endIdx].time as UTCTimestamp;
+          if (sig.stop_loss > 0) {
+            signalSlLine.setData([
+              { time: t1, value: sig.stop_loss },
+              { time: t2, value: sig.stop_loss },
+            ]);
+          } else {
+            signalSlLine.setData([]);
+          }
+          if (sig.take_profit > 0) {
+            signalTpLine.setData([
+              { time: t1, value: sig.take_profit },
+              { time: t2, value: sig.take_profit },
+            ]);
+          } else {
+            signalTpLine.setData([]);
+          }
+        }
+      } else {
+        signalSlLine.setData([]);
+        signalTpLine.setData([]);
+      }
+    } else {
+      signalSlLine.setData([]);
+      signalTpLine.setData([]);
+    }
   }
 }
