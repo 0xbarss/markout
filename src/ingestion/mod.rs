@@ -9,6 +9,7 @@ use crate::models::{Bar, Signal, StopPoint, Trade};
 
 pub mod json;
 pub mod ohlcv;
+pub mod parquet;
 pub mod signal;
 pub mod sqlite;
 
@@ -25,6 +26,10 @@ pub enum IngestError {
     Csv(#[from] csv::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("parquet error: {0}")]
+    Parquet(#[from] ::parquet::errors::ParquetError),
+    #[error("arrow error: {0}")]
+    Arrow(#[from] arrow::error::ArrowError),
     #[error("table `{0}` not found")]
     MissingTable(String),
     #[error("missing column `{column}` in table `{table}`")]
@@ -56,16 +61,26 @@ pub(crate) fn extension(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
-/// Timestamps at or above this magnitude are assumed to be milliseconds.
+/// Timestamps at or above this magnitude are assumed to be milliseconds/microseconds/nanoseconds.
 const MILLIS_THRESHOLD: i64 = 100_000_000_000;
+const MICROS_THRESHOLD: i64 = 100_000_000_000_000;
+const NANOS_THRESHOLD: i64 = 100_000_000_000_000_000;
 
-/// Convert a possibly-millisecond Unix timestamp to seconds.
+/// Convert a possibly millisecond, microsecond, or nanosecond Unix timestamp to seconds.
 pub fn normalize_time(t: i64) -> i64 {
-    if t.abs() >= MILLIS_THRESHOLD {
+    if t.abs() >= NANOS_THRESHOLD {
+        t / 1_000_000_000
+    } else if t.abs() >= MICROS_THRESHOLD {
+        t / 1_000_000
+    } else if t.abs() >= MILLIS_THRESHOLD {
         t / 1000
     } else {
         t
     }
+}
+
+pub fn is_parquet_format(path: &Path) -> bool {
+    extension(path) == "parquet"
 }
 
 pub(crate) fn parse_enum<T: serde::de::DeserializeOwned>(
@@ -185,7 +200,7 @@ impl Dataset {
         }
         match (bars, trades) {
             (Some(p), _) => ds.bars = ohlcv::load(p)?,
-            (None, Some(p)) if !json::is_text_format(p) => {
+            (None, Some(p)) if !json::is_text_format(p) && !is_parquet_format(p) => {
                 ds.bars = sqlite::load_bars_if_present(p)?
             }
             _ => {}
@@ -214,7 +229,9 @@ impl Dataset {
 }
 
 pub fn load_trades(path: &Path) -> Result<Vec<Trade>> {
-    if json::is_text_format(path) {
+    if is_parquet_format(path) {
+        parquet::load_trades(path)
+    } else if json::is_text_format(path) {
         json::load_trades(path)
     } else {
         sqlite::load_trades(path)

@@ -57,23 +57,29 @@ pub fn load_dir(dir: &Path) -> Result<Vec<Bar>> {
     let mut files: Vec<_> = std::fs::read_dir(dir)
         .map_err(|e| io_err(dir, e))?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_file() && extension(p) == "csv")
+        .filter(|p| p.is_file() && matches!(extension(p).as_str(), "csv" | "parquet"))
         .collect();
     files.sort();
 
     let mut all = Vec::new();
     for f in files {
-        all.extend(load_csv(&f)?);
+        if extension(&f) == "parquet" {
+            all.extend(super::parquet::load_bars(&f)?);
+        } else {
+            all.extend(load_csv(&f)?);
+        }
     }
     normalize_bars(all)
 }
 
-/// Load bars from a CSV file, a directory of CSV files, or a SQLite database.
+/// Load bars from a CSV file, a Parquet file, a directory of CSV/Parquet files, or a SQLite database.
 pub fn load(path: &Path) -> Result<Vec<Bar>> {
     if path.is_dir() {
         load_dir(path)
     } else if matches!(extension(path).as_str(), "sqlite" | "sqlite3" | "db") {
         sqlite::load_bars(path)
+    } else if extension(path) == "parquet" {
+        super::parquet::load_bars(path)
     } else {
         load_csv(path)
     }

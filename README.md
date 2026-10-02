@@ -14,9 +14,9 @@ An interactive financial time-series visualizer, session replay engine, and live
 - **Trade ledger with MAE / MFE**: Granular maximum adverse and favorable excursion metrics, duration, and in-cell R-multiple micro-bars.
 - **Interactive drawing suite**: Trendlines, rays, horizontal/vertical levels, Fibonacci retracements, risk/reward position brackets, zones, measurement rulers, and text notes.
 - **Live streaming daemon**: Generic event bus with WebSocket streaming (`/ws/stream`) and REST API.
+- **Apache Parquet ingestion**: High-throughput zero-copy loading of `.parquet` bar and trade datasets (including compatibility with market simulators and tick feeds).
 
 ### Planned
-- Parquet bar file ingestion
 - Multi-chart synchronized split layouts
 - Export annotated replay sessions to video / animated GIF
 
@@ -24,7 +24,7 @@ An interactive financial time-series visualizer, session replay engine, and live
 
 ```bash
 # Offline review of historical sessions
-markout --db ./data/trades.sqlite --bars ./data/bars/
+markout --db ./data/trades.parquet --bars ./data/bars.parquet
 
 # Live monitoring daemon
 markout live --port 8080
@@ -46,10 +46,10 @@ Entries and exits are drawn as arrows and dots, with each trade's trailing stop 
 
 | Data | Formats |
 | :-- | :-- |
-| Bars | CSV (`time,open,high,low,close,volume`), a directory of CSV files, or a SQLite `bars` table |
-| Trades | SQLite `trades` table, `.jsonl`/`.ndjson`, `.json` array, or `.csv` |
+| Bars | Apache Parquet (`.parquet`), CSV (`time,open,high,low,close,volume`), a directory of CSV/Parquet files, or a SQLite `bars` table |
+| Trades | Apache Parquet (`.parquet`), SQLite `trades` table, `.jsonl`/`.ndjson`, `.json` array, or `.csv` |
 
-Timestamps are Unix seconds (millisecond values are detected and converted). Every record is validated on load (finite prices, consistent high/low, ordered timestamps, no duplicate bars) and errors name the offending row or trade. Parquet is not yet supported.
+Timestamps are Unix seconds (millisecond, microsecond, and nanosecond values are automatically detected and converted). Every record is validated on load (finite prices, consistent high/low, ordered timestamps, no duplicate bars) and errors name the offending row or trade.
 
 ## Embedding
 

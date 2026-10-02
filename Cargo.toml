@@ -28,6 +28,9 @@ tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+parquet = { version = "60.0.0", default-features = false, features = ["arrow", "snap"] }
+arrow = { version = "60.0.0", default-features = false }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 
 [dev-dependencies]
 tempfile = "3"
