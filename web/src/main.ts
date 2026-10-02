@@ -19,6 +19,7 @@ import {
   renderTick,
   renderTicker,
   renderTimeframes,
+  setBarCountdownContext,
 } from "./ui/header.ts";
 import { mountLedger } from "./ui/ledger.ts";
 import { renderStats } from "./ui/panel.ts";
@@ -167,16 +168,18 @@ async function main(): Promise<void> {
     },
   );
 
+  let base = baseInterval(bars);
+  let active = TIMEFRAMES.find((t) => isResamplable(base, t.sec))?.sec ?? base;
+
   replay.onFrame((frame) => {
     chart.setBars(frame.visibleBars, false);
     chart.setTrades(frame.visibleTrades, frame.visibleBars);
     chart.setSignals(frame.visibleSignals, frame.visibleBars);
     renderTicker(frame.visibleBars);
-    renderLegend(null, frame.visibleBars[frame.visibleBars.length - 1]);
+    const latestBar = frame.visibleBars[frame.visibleBars.length - 1];
+    setBarCountdownContext(latestBar ? latestBar.time : null, active);
+    renderLegend(null, latestBar);
   });
-
-  let base = baseInterval(bars);
-  let active = TIMEFRAMES.find((t) => isResamplable(base, t.sec))?.sec ?? base;
   const apply = () => {
     if (!isResamplable(base, active)) {
       active = base;
@@ -185,6 +188,8 @@ async function main(): Promise<void> {
     replay.setData(view, overlayTrades, overlaySignals);
     replayBar.setTrades(overlayTrades, view);
     chart.fit();
+    const latestBar = view[view.length - 1];
+    setBarCountdownContext(latestBar ? latestBar.time : null, active);
     chart.drawings.setContext(symbol, active);
     renderTimeframes(base, active, (sec) => {
       if (isResamplable(base, sec)) {
@@ -216,10 +221,10 @@ async function main(): Promise<void> {
         }
 
 
-        const last = bars[bars.length - 1];
-        if (b.time === last.time) {
-          bars[bars.length - 1] = b;
-        } else if (b.time > last.time) {
+        const existingIdx = bars.findIndex((x) => x.time === b.time);
+        if (existingIdx >= 0) {
+          bars[existingIdx] = b;
+        } else if (bars.length === 0 || b.time > bars[bars.length - 1].time) {
           bars.push(b);
         }
 
@@ -245,6 +250,10 @@ async function main(): Promise<void> {
         break;
       }
       case "tick": {
+        if (symbol === "—" && event.data.symbol) {
+          symbol = event.data.symbol;
+          renderSymbol(symbol);
+        }
         const visible = replay.getVisibleBars();
         const last = visible[visible.length - 1];
         renderTick(event.data, last?.close);

@@ -242,11 +242,79 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
     },
 
     setBars(bars, fit = false) {
-      currentBars = bars;
-      if (bars.length > 0) {
-        const p = precisionFor(bars[bars.length - 1].close);
-        candles.applyOptions({ priceFormat: { type: "price", precision: p, minMove: 1 / 10 ** p } });
+      if (bars.length === 0) {
+        currentBars = [];
+        candles.setData([]);
+        volume.setData([]);
+        return;
       }
+
+      const prevBars = currentBars;
+      currentBars = bars;
+
+      const p = precisionFor(bars[bars.length - 1].close);
+      candles.applyOptions({ priceFormat: { type: "price", precision: p, minMove: 1 / 10 ** p } });
+
+      const lastBar = bars[bars.length - 1];
+      const candleItem = {
+        time: lastBar.time as UTCTimestamp,
+        open: lastBar.open,
+        high: lastBar.high,
+        low: lastBar.low,
+        close: lastBar.close,
+      };
+      const volumeItem = {
+        time: lastBar.time as UTCTimestamp,
+        value: lastBar.volume,
+        color: lastBar.close >= lastBar.open ? hexToRgba(UP, 0.4) : hexToRgba(DOWN, 0.4),
+      };
+
+
+
+      // Real-time update: same candle updated in-place
+      if (
+        prevBars.length === bars.length &&
+        prevBars.length > 0 &&
+        prevBars[prevBars.length - 1].time === lastBar.time
+      ) {
+        candles.update(candleItem);
+        volume.update(volumeItem);
+        drawings.render();
+        return;
+      }
+
+      // Real-time append: single new candle added
+      if (
+        prevBars.length + 1 === bars.length &&
+        prevBars.length > 0 &&
+        prevBars[prevBars.length - 1].time < lastBar.time
+      ) {
+        // Finalize previous closed bar
+        if (bars.length >= 2) {
+          const prev = bars[bars.length - 2];
+          candles.update({
+            time: prev.time as UTCTimestamp,
+            open: prev.open,
+            high: prev.high,
+            low: prev.low,
+            close: prev.close,
+          });
+          volume.update({
+            time: prev.time as UTCTimestamp,
+            value: prev.volume,
+            color: prev.close >= prev.open ? hexToRgba(UP, 0.4) : hexToRgba(DOWN, 0.4),
+          });
+        }
+        candles.update(candleItem);
+        volume.update(volumeItem);
+        drawings.render();
+        return;
+      }
+
+      const timeScale = chart.timeScale();
+      const prevRange = timeScale.getVisibleLogicalRange();
+
+      // Full series replacement (timeframe switch, initial data, seek)
       candles.setData(bars.map((b) => ({
         time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close,
       })));
@@ -255,15 +323,17 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
         color: b.close >= b.open ? hexToRgba(UP, 0.4) : hexToRgba(DOWN, 0.4),
       })));
 
-      if (!hasInitializedScale && bars.length > 0) {
-        if (fit) chart.timeScale().fitContent();
+      if (!hasInitializedScale) {
+        timeScale.fitContent();
         chart.priceScale("right").applyOptions({ autoScale: false });
         hasInitializedScale = true;
         isInitializing = false;
         autoScale = false;
         updateAutoBtn();
-      } else {
-        if (fit) chart.timeScale().fitContent();
+      } else if (fit) {
+        timeScale.fitContent();
+      } else if (prevRange) {
+        timeScale.setVisibleLogicalRange(prevRange);
       }
       drawings.render();
     },

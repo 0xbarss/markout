@@ -217,16 +217,48 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   background: var(--accent-dim);
 }
 
+.ticker-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
 .ticker {
   font: 700 14px var(--mono);
   display: flex;
   gap: 6px;
   align-items: baseline;
-  padding: 2px 6px;
+  padding: 1px 6px;
   border-radius: 4px;
   transition: background 0.15s ease;
 }
 .chg { font-size: 12px; }
+
+.bar-countdown-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.countdown-lbl {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.countdown-val {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+}
 
 @keyframes flashUp {
   0% { background: transparent; }

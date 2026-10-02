@@ -42,6 +42,48 @@ function flashTicker(newPrice: number): void {
   lastPriceVal = newPrice;
 }
 
+let currentLastBarTime: number | null = null;
+let currentTimeframeSec: number = 60;
+let countdownTimer: ReturnType<typeof setInterval> | null = null;
+
+export function formatCountdown(sec: number): string {
+  if (sec <= 0) return "00:00";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+export function setBarCountdownContext(lastBarTime: number | null, timeframeSec: number): void {
+  currentLastBarTime = lastBarTime;
+  if (timeframeSec > 0) {
+    currentTimeframeSec = timeframeSec;
+  }
+  renderCountdown();
+
+  if (countdownTimer === null) {
+    countdownTimer = setInterval(() => {
+      renderCountdown();
+    }, 1000);
+  }
+}
+
+function renderCountdown(): void {
+  const el = document.getElementById("bar-countdown");
+  if (!el) return;
+  if (currentLastBarTime === null || currentTimeframeSec <= 0) {
+    el.textContent = "—";
+    return;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const closeTime = currentLastBarTime + currentTimeframeSec;
+  const remaining = Math.max(0, closeTime - now);
+  el.textContent = formatCountdown(remaining);
+}
+
 export function renderTicker(bars: Bar[]): void {
   const last = bars[bars.length - 1];
   if (!last) return;

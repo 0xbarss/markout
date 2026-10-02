@@ -68,21 +68,27 @@ export class ReplayController {
       return;
     }
 
-    const last = this.bars[this.bars.length - 1];
-    if (bar.time === last.time) {
-      this.bars[this.bars.length - 1] = bar;
+    const wasLive = !this.isPlaying && (this.cursor >= this.bars.length - 2);
+
+    const existingIdx = this.bars.findIndex((b) => b.time === bar.time);
+    if (existingIdx >= 0) {
+      this.bars[existingIdx] = bar;
+      if (wasLive) {
+        this.cursor = this.bars.length - 1;
+      }
+      this.emitState();
       this.emitFrame();
       return;
     }
 
-    if (bar.time > last.time) {
-      const wasLive = this.isLive() && !this.isPlaying;
+    if (bar.time > this.bars[this.bars.length - 1].time) {
       this.bars.push(bar);
       if (wasLive) {
         this.cursor = this.bars.length - 1;
       }
       this.emitState();
       this.emitFrame();
+      return;
     }
   }
 
@@ -143,7 +149,7 @@ export class ReplayController {
   }
 
   public isLive(): boolean {
-    return this.bars.length === 0 || this.cursor >= this.bars.length - 1;
+    return this.bars.length === 0 || this.cursor >= this.bars.length - 2;
   }
 
   public getVisibleBars(): Bar[] {
