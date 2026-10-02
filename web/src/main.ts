@@ -7,6 +7,7 @@ import { spanOf } from "./overlays/sl_tp_trail";
 import { baseInterval, resample, TIMEFRAMES } from "./resample";
 import { ReplayController } from "./replay/controller.ts";
 import { mountReplayBar } from "./ui/replay_bar.ts";
+import { mountDrawingTools } from "./ui/tools.ts";
 import { renderHeaderStats, renderSymbol, renderTicker, renderTimeframes } from "./ui/header.ts";
 import { mountLedger } from "./ui/ledger.ts";
 import { renderStats } from "./ui/panel.ts";
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
   const chart = createTerminalChart($("chart"));
   const replay = new ReplayController();
   mountReplayBar(replay);
+  mountDrawingTools(chart.drawings);
 
   const symbol = dominantSymbol(trades);
   const overlayTrades = trades.filter((t) => t.symbol === symbol);
@@ -69,6 +71,7 @@ async function main(): Promise<void> {
     view = active === base || base === 0 ? bars : resample(bars, active);
     replay.setData(view, overlayTrades);
     chart.fit();
+    chart.drawings.setContext(symbol, active);
     renderTimeframes(base, active, (sec) => { active = sec; apply(); });
   };
 

@@ -18,13 +18,15 @@
       <div class="stat"><span class="lbl">PnL</span><span id="pnl">—</span></div>
     </header>
 
-    <aside class="tools" aria-label="Drawing tools (coming soon)">
-      <button disabled title="Crosshair">✛</button>
-      <button disabled title="Trendline">/</button>
-      <button disabled title="Horizontal line">─</button>
-      <button disabled title="Zone">□</button>
-      <button disabled title="Fibonacci">≡</button>
-      <button disabled title="Measure">⤢</button>
+    <aside class="tools" aria-label="Drawing tools">
+      <button id="tool-cursor" class="active" title="Crosshair / Select">✛</button>
+      <button id="tool-trendline" title="Trendline">/</button>
+      <button id="tool-horizontal" title="Horizontal line">─</button>
+      <button id="tool-box" title="Zone box">□</button>
+      <button id="tool-fibonacci" title="Fibonacci">≡</button>
+      <button id="tool-position" title="Position Risk-Reward">⤢</button>
+      <button id="tool-measure" title="Measure ruler">📏</button>
+      <button id="tool-clear" title="Clear all drawings">🗑</button>
     </aside>
 
     <main class="chart-area">

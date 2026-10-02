@@ -2,8 +2,11 @@ import {
   ColorType, CrosshairMode, LineStyle, LineType, createChart,
   type CandlestickData, type ISeriesApi, type LineData, type UTCTimestamp, type WhitespaceData,
 } from "lightweight-charts";
+import { DrawingManager } from "./drawings/manager.ts";
+import type { CoordinateConverter } from "./drawings/types.ts";
 import { precisionFor } from "./format";
 import { buildMarkers } from "./overlays/markers";
+import { barIndexAt } from "./overlays/snap.ts";
 import { buildTrail, type TrailPoint } from "./overlays/sl_tp_trail";
 import type { Bar, Trade } from "./types";
 
@@ -19,6 +22,7 @@ export interface TerminalChart {
   /** Show bar indices [from, to] (relative to the bars passed to setBars). */
   focus(from: number, to: number): void;
   onCrosshair(cb: (ohlc: Ohlc | null) => void): void;
+  drawings: DrawingManager;
 }
 
 export function createTerminalChart(container: HTMLElement): TerminalChart {
@@ -54,8 +58,54 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
     pool.forEach((series, i) => series.setData(toData(lanes[i] ?? [])));
   };
 
+  const drawingCanvas = document.createElement("canvas");
+  drawingCanvas.className = "drawing-canvas";
+  container.style.position = "relative";
+  container.appendChild(drawingCanvas);
+
+  let currentBars: Bar[] = [];
+  const conv: CoordinateConverter = {
+    timeToX: (t) => chart.timeScale().timeToCoordinate(t as UTCTimestamp),
+    xToTime: (x) => chart.timeScale().coordinateToTime(x as any) as number | null,
+    priceToY: (p) => candles.priceToCoordinate(p),
+    yToPrice: (y) => candles.coordinateToPrice(y as any) as number | null,
+    snapPoint: (x, y) => {
+      if (currentBars.length === 0) return null;
+      const t = chart.timeScale().coordinateToTime(x as any) as number | null;
+      if (t === null) return null;
+      const bi = barIndexAt(currentBars, t);
+      if (bi < 0 || bi >= currentBars.length) return null;
+      const b = currentBars[bi];
+      const bx = chart.timeScale().timeToCoordinate(b.time as UTCTimestamp);
+      if (bx === null || Math.abs(bx - x) > 24) return null;
+      const py = candles.coordinateToPrice(y as any);
+      if (py === null) return null;
+      const levels = [b.high, b.low, b.open, b.close];
+      let bestPrice = levels[0];
+      let bestDist = Math.abs(bestPrice - py);
+      for (let i = 1; i < levels.length; i++) {
+        const dist = Math.abs(levels[i] - py);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestPrice = levels[i];
+        }
+      }
+      const wickY = candles.priceToCoordinate(bestPrice);
+      if (wickY === null || Math.abs(wickY - y) > 24) return null;
+      return { time: b.time, price: bestPrice };
+    },
+  };
+
+  const drawings = new DrawingManager(drawingCanvas, conv);
+  chart.timeScale().subscribeVisibleLogicalRangeChange(() => drawings.render());
+  chart.timeScale().subscribeVisibleTimeRangeChange(() => drawings.render());
+  window.addEventListener("resize", () => drawings.resize());
+  requestAnimationFrame(() => drawings.resize());
+
   return {
+    drawings,
     setBars(bars, fit = false) {
+      currentBars = bars;
       if (bars.length > 0) {
         const p = precisionFor(bars[bars.length - 1].close);
         candles.applyOptions({ priceFormat: { type: "price", precision: p, minMove: 1 / 10 ** p } });
@@ -68,6 +118,7 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
         color: b.close >= b.open ? "rgba(14,203,129,0.4)" : "rgba(246,70,93,0.4)",
       })));
       if (fit) chart.timeScale().fitContent();
+      drawings.render();
     },
     fit() {
       chart.timeScale().fitContent();
