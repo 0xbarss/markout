@@ -120,9 +120,11 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       if (fit) chart.timeScale().fitContent();
       drawings.render();
     },
+
     fit() {
       chart.timeScale().fitContent();
     },
+
     setTrades(trades, bars) {
       candles.setMarkers(buildMarkers(trades, bars));
       const trail = buildTrail(trades, bars);

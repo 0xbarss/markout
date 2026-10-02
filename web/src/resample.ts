@@ -1,9 +1,21 @@
 import type { Bar } from "./types";
 
 export const TIMEFRAMES = [
-  { label: "1m", sec: 60 }, { label: "5m", sec: 300 }, { label: "15m", sec: 900 },
-  { label: "1h", sec: 3600 }, { label: "4h", sec: 14400 }, { label: "1D", sec: 86400 },
+  { label: "1s", sec: 1 },
+  { label: "1m", sec: 60 },
+  { label: "3m", sec: 180 },
+  { label: "5m", sec: 300 },
+  { label: "15m", sec: 900 },
+  { label: "30m", sec: 1800 },
+  { label: "1h", sec: 3600 },
+  { label: "2h", sec: 7200 },
+  { label: "4h", sec: 14400 },
+  { label: "6h", sec: 21600 },
+  { label: "12h", sec: 43200 },
+  { label: "1D", sec: 86400 },
+  { label: "1W", sec: 604800 },
 ] as const;
+
 
 /** Median spacing between bars in seconds (0 when it cannot be determined). */
 export function baseInterval(bars: Bar[]): number {

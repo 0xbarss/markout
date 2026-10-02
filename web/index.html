@@ -4,13 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0e11" />
-  <title>markout</title>
+  <title>Markout — Quantitative Trading Terminal</title>
 </head>
 <body>
   <div id="app">
     <header class="topbar">
       <button id="mobile-tools-btn" class="mobile-tools-btn" title="Drawing tools" aria-label="Toggle drawing tools">✎</button>
-      <div class="brand">markout</div>
+      <div class="brand">
+        <span class="brand-icon">∿</span>
+        <span class="brand-text">Markout</span>
+      </div>
       <div id="symbol" class="symbol">—</div>
       <div id="tf-pills" class="pills"></div>
       <div class="spacer"></div>
@@ -18,7 +21,6 @@
       <div class="stat"><span class="lbl">Equity</span><span id="equity">—</span></div>
       <div class="stat"><span class="lbl">PnL</span><span id="pnl">—</span></div>
     </header>
-
 
     <aside class="tools" aria-label="Drawing tools">
       <button id="tool-cursor" class="active" title="Crosshair / Select">✛</button>
@@ -28,8 +30,10 @@
       <button id="tool-fibonacci" title="Fibonacci">≡</button>
       <button id="tool-position" title="Position Risk-Reward">⤢</button>
       <button id="tool-measure" title="Measure ruler">📏</button>
+      <button id="tool-save" title="Save drawings">💾</button>
       <button id="tool-clear" title="Clear all drawings">🗑</button>
     </aside>
+
 
     <main class="chart-area">
       <div id="legend" class="legend"></div>

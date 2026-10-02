@@ -16,7 +16,6 @@ export class DrawingManager {
   private ctx: CanvasRenderingContext2D;
   private conv: CoordinateConverter;
   private symbol = "—";
-  private timeframe = 0;
   private drawings: Drawing[] = [];
   private activeTool: DrawingTool = "cursor";
   private pendingPoint: Point | null = null;
@@ -35,12 +34,12 @@ export class DrawingManager {
     this.setTool("cursor");
   }
 
-  public setContext(symbol: string, timeframe: number): void {
+  public setContext(symbol: string, _timeframe?: number): void {
     this.symbol = symbol;
-    this.timeframe = timeframe;
     this.loadFromStorage();
     this.render();
   }
+
 
   public getActiveTool(): DrawingTool {
     return this.activeTool;
@@ -75,6 +74,12 @@ export class DrawingManager {
     this.emitChange();
     this.render();
   }
+
+  public save(): boolean {
+    this.saveToStorage();
+    return true;
+  }
+
 
   public onToolChange(cb: (tool: DrawingTool) => void): () => void {
     this.toolListeners.add(cb);
@@ -226,8 +231,9 @@ export class DrawingManager {
   }
 
   private storageKey(): string {
-    return `markout:drawings:${this.symbol}:${this.timeframe}`;
+    return `markout:drawings:${this.symbol}`;
   }
+
 
   private saveToStorage(): void {
     try {

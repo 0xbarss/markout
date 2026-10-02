@@ -183,6 +183,25 @@ impl Dataset {
             }
             _ => {}
         }
+        if ds.bars.is_empty() && bars.is_none() && db.is_none() {
+            let default_bars = Path::new("examples/bars.csv");
+            let default_trades = Path::new("examples/trades.jsonl");
+            if default_bars.exists() {
+                ds.bars = ohlcv::load(default_bars).unwrap_or_default();
+            } else {
+                ds.bars = ohlcv::parse_csv(include_str!("../../examples/bars.csv").as_bytes())
+                    .unwrap_or_default();
+            }
+            if ds.trades.is_empty() {
+                if default_trades.exists() {
+                    ds.trades = load_trades(default_trades).unwrap_or_default();
+                } else {
+                    ds.trades =
+                        json::parse_jsonl(include_str!("../../examples/trades.jsonl").as_bytes())
+                            .unwrap_or_default();
+                }
+            }
+        }
         Ok(ds)
     }
 }

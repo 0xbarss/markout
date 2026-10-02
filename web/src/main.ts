@@ -78,6 +78,8 @@ async function main(): Promise<void> {
     renderLegend(null, frame.visibleBars[frame.visibleBars.length - 1]);
   });
 
+
+
   let base = baseInterval(bars);
   let active = TIMEFRAMES.find((t) => t.sec >= base)?.sec ?? 0;
   const apply = () => {

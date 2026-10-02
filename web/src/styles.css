@@ -21,7 +21,13 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 
 .topbar { grid-area: top; display: flex; align-items: center; gap: 16px; padding: 0 12px;
   background: var(--bg); border-bottom: 1px solid var(--border); overflow-x: auto; white-space: nowrap; }
-.brand { color: var(--accent); font-weight: 700; letter-spacing: .5px; }
+.brand { display: flex; align-items: center; gap: 7px; user-select: none; }
+.brand-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border-radius: 4px; background: linear-gradient(135deg, rgba(247, 166, 0, 0.25) 0%, rgba(247, 166, 0, 0.05) 100%);
+  border: 1px solid rgba(247, 166, 0, 0.4); color: var(--accent); font-size: 13px; font-weight: 800; line-height: 1; }
+.brand-text { font-size: 15px; font-weight: 800; letter-spacing: -0.2px;
+  background: linear-gradient(135deg, #ffffff 40%, var(--accent) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .symbol { font-weight: 600; }
 .spacer { flex: 1; }
 .pills { display: flex; gap: 2px; }
@@ -35,13 +41,16 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   padding: 8px 0; background: var(--panel); border-right: 1px solid var(--border); }
 .tools button { padding: 6px 0; width: 32px; font-size: 14px; }
 .tools button.active { color: var(--accent); background: var(--border); border-color: var(--accent); }
+.tools button#tool-save.active { color: var(--up); border-color: var(--up); }
 
 .chart-area { grid-area: chart; position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 #chart { flex: 1; min-height: 0; position: relative; }
 .drawing-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
 .legend { position: absolute; z-index: 2; top: 6px; left: 10px; font: 12px var(--mono); pointer-events: none; }
 .legend span { margin-right: 10px; }
-.empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); z-index: 1; }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); z-index: 1; pointer-events: none; }
+.empty[hidden], [hidden] { display: none !important; }
+
 .replay { display: flex; align-items: center; gap: 6px; padding: 6px 12px;
   background: var(--panel); border-top: 1px solid var(--border); user-select: none; }
 .replay input[type="range"] { flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px; }

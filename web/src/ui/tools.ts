@@ -20,10 +20,25 @@ export function mountDrawingTools(manager: DrawingManager): void {
     });
   }
 
+  const saveBtn = document.getElementById("tool-save");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", () => {
+      manager.save();
+      const origText = saveBtn.textContent;
+      saveBtn.textContent = "✓";
+      saveBtn.classList.add("active");
+      setTimeout(() => {
+        saveBtn.textContent = origText;
+        saveBtn.classList.remove("active");
+      }, 1000);
+    });
+  }
+
   const clearBtn = $("tool-clear");
   clearBtn.addEventListener("click", () => {
     manager.clear();
   });
+
 
   manager.onToolChange((active) => {
     for (const [id, tool] of tools) {
