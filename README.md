@@ -1,6 +1,5 @@
 # markout
 
-[![CI](https://github.com/0xbarss/markout/actions/workflows/ci.yml/badge.svg)](https://github.com/0xbarss/markout/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/0xbarss/markout.svg)](https://github.com/0xbarss/markout/releases)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![TypeScript](https://img.shields.io/badge/typescript-5.4%2B-blue.svg)](https://www.typescriptlang.org)
