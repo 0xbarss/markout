@@ -1,0 +1,39 @@
+[package]
+name = "markout"
+version = "0.1.0"
+edition = "2021"
+description = "Interactive financial time-series visualizer, session replay engine and live trading monitor"
+license = "MIT"
+
+[lib]
+name = "markout"
+path = "src/lib.rs"
+
+[[bin]]
+name = "markout"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.7", features = ["ws"] }
+clap = { version = "4", features = ["derive"] }
+csv = "1"
+mime_guess = "2"
+rust-embed = "8"
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.4", features = ["util"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
