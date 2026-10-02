@@ -31,10 +31,14 @@
       <div id="legend" class="legend"></div>
       <div id="chart"></div>
       <div id="empty" class="empty" hidden>No bars loaded. Start markout with <code>--bars &lt;path&gt;</code>.</div>
-      <div class="replay" aria-disabled="true">
-        <button disabled>▶ Play</button><button disabled>❚❚ Pause</button>
-        <button disabled>⏮</button><button disabled>⏭</button>
-        <input type="range" disabled value="100" aria-label="Replay position" />
+      <div class="replay" id="replay-bar">
+        <button id="replay-play" title="Play / Pause">▶ Play</button>
+        <button id="replay-prev" title="Step backward">⏮</button>
+        <button id="replay-next" title="Step forward">⏭</button>
+        <button id="replay-speed" class="speed-btn" title="Replay speed">1x</button>
+        <input id="replay-slider" type="range" min="0" max="0" value="0" aria-label="Replay position" />
+        <span id="replay-counter" class="counter">0 / 0</span>
+        <button id="replay-live" class="live-btn" title="Jump to latest candle">Live</button>
       </div>
     </main>
 

@@ -5,10 +5,12 @@ import { $, h } from "./dom";
 import { fmtPrice, fmtSigned, signClass } from "./format";
 import { spanOf } from "./overlays/sl_tp_trail";
 import { baseInterval, resample, TIMEFRAMES } from "./resample";
-import { renderHeaderStats, renderSymbol, renderTicker, renderTimeframes } from "./ui/header";
-import { mountLedger } from "./ui/ledger";
-import { renderStats } from "./ui/panel";
-import type { Bar, Trade } from "./types";
+import { ReplayController } from "./replay/controller.ts";
+import { mountReplayBar } from "./ui/replay_bar.ts";
+import { renderHeaderStats, renderSymbol, renderTicker, renderTimeframes } from "./ui/header.ts";
+import { mountLedger } from "./ui/ledger.ts";
+import { renderStats } from "./ui/panel.ts";
+import type { Bar, Trade } from "./types.ts";
 
 function renderLegend(o: Ohlc | null, fallback: Bar | undefined): void {
   const src = o ?? fallback;
@@ -35,6 +37,8 @@ function dominantSymbol(trades: Trade[]): string {
 async function main(): Promise<void> {
   const [bars, trades, stats] = await loadAll();
   const chart = createTerminalChart($("chart"));
+  const replay = new ReplayController();
+  mountReplayBar(replay);
 
   const symbol = dominantSymbol(trades);
   const overlayTrades = trades.filter((t) => t.symbol === symbol);
@@ -51,19 +55,27 @@ async function main(): Promise<void> {
     $("chart").scrollIntoView({ block: "nearest", behavior: "smooth" });
   });
 
+  replay.onFrame((frame) => {
+    chart.setBars(frame.visibleBars, false);
+    chart.setTrades(frame.visibleTrades, frame.visibleBars);
+    renderTicker(frame.visibleBars);
+    renderLegend(null, frame.visibleBars[frame.visibleBars.length - 1]);
+  });
+
   const base = baseInterval(bars);
   // Start on the native timeframe: the first pill at or above the data's interval.
   let active = TIMEFRAMES.find((t) => t.sec >= base)?.sec ?? 0;
   const apply = () => {
     view = active === base || base === 0 ? bars : resample(bars, active);
-    chart.setBars(view);
-    chart.setTrades(overlayTrades, view);
-    renderTicker(view);
-    renderLegend(null, view[view.length - 1]);
+    replay.setData(view, overlayTrades);
+    chart.fit();
     renderTimeframes(base, active, (sec) => { active = sec; apply(); });
   };
 
-  chart.onCrosshair((o) => renderLegend(o, view[view.length - 1]));
+  chart.onCrosshair((o) => {
+    const visible = replay.getVisibleBars();
+    renderLegend(o, visible[visible.length - 1]);
+  });
   $("empty").hidden = bars.length > 0;
   apply();
 }

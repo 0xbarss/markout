@@ -12,7 +12,8 @@ const UP = "#0ecb81", DOWN = "#f6465d";
 export interface Ohlc { open: number; high: number; low: number; close: number; }
 
 export interface TerminalChart {
-  setBars(bars: Bar[]): void;
+  setBars(bars: Bar[], fit?: boolean): void;
+  fit(): void;
   /** Draw entry/exit markers and SL/TP paths for `trades` against the bars currently shown. */
   setTrades(trades: Trade[], bars: Bar[]): void;
   /** Show bar indices [from, to] (relative to the bars passed to setBars). */
@@ -54,7 +55,7 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
   };
 
   return {
-    setBars(bars) {
+    setBars(bars, fit = false) {
       if (bars.length > 0) {
         const p = precisionFor(bars[bars.length - 1].close);
         candles.applyOptions({ priceFormat: { type: "price", precision: p, minMove: 1 / 10 ** p } });
@@ -66,6 +67,9 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
         time: b.time as UTCTimestamp, value: b.volume,
         color: b.close >= b.open ? "rgba(14,203,129,0.4)" : "rgba(246,70,93,0.4)",
       })));
+      if (fit) chart.timeScale().fitContent();
+    },
+    fit() {
       chart.timeScale().fitContent();
     },
     setTrades(trades, bars) {

@@ -40,9 +40,14 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .legend { position: absolute; z-index: 2; top: 6px; left: 10px; font: 12px var(--mono); pointer-events: none; }
 .legend span { margin-right: 10px; }
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); z-index: 1; }
-.replay { display: flex; align-items: center; gap: 4px; padding: 6px 10px;
-  background: var(--panel); border-top: 1px solid var(--border); }
-.replay input { flex: 1; margin-left: 8px; }
+.replay { display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+  background: var(--panel); border-top: 1px solid var(--border); user-select: none; }
+.replay input[type="range"] { flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px; }
+.replay .counter { font-family: var(--mono); font-size: 11px; color: var(--muted); min-width: 65px; text-align: right; }
+.replay .live-btn { font-size: 11px; font-weight: 600; padding: 3px 8px; border: 1px solid var(--border2); border-radius: 3px; }
+.replay .live-btn.synced { color: var(--up); border-color: rgba(14, 203, 129, 0.3); background: rgba(14, 203, 129, 0.08); }
+.replay .live-btn.behind { color: var(--accent); border-color: rgba(247, 166, 0, 0.4); background: rgba(247, 166, 0, 0.08); }
+.replay .speed-btn { font-family: var(--mono); font-weight: 600; font-size: 11px; min-width: 36px; padding: 3px 6px; border: 1px solid var(--border2); }
 
 .panel { grid-area: panel; padding: 12px; background: var(--panel); border-left: 1px solid var(--border); overflow-y: auto; }
 .panel h3 { margin: 0 0 10px; font-size: 11px; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); }
