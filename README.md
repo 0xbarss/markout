@@ -1,5 +1,7 @@
 # markout
 
+[![Crates.io](https://img.shields.io/crates/v/markout-app.svg)](https://crates.io/crates/markout-app)
+[![Docs.rs](https://docs.rs/markout-app/badge.svg)](https://docs.rs/markout-app)
 [![Release](https://img.shields.io/github/v/release/0xbarss/markout.svg)](https://github.com/0xbarss/markout/releases)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![TypeScript](https://img.shields.io/badge/typescript-5.4%2B-blue.svg)](https://www.typescriptlang.org)
@@ -23,6 +25,7 @@ Interactive financial time-series visualizer, session replay engine, and live tr
 - [Key Features](#key-features)
 - [Repository Structure](#repository-structure)
 - [Prerequisites & Installation](#prerequisites--installation)
+  - [Install via Cargo](#install-via-cargo)
   - [Building from Source](#building-from-source)
   - [Development Workflow](#development-workflow)
 - [Usage & Code Examples](#usage--code-examples)
@@ -245,6 +248,12 @@ markout/
 
 ## Prerequisites & Installation
 
+### Install via Cargo
+
+```bash
+cargo install markout-app
+```
+
 ### Building from Source
 
 To compile `markout` into a standalone binary embedding the web UI, install the standard Rust toolchain (1.75+) and Node.js (18+).
@@ -333,11 +342,11 @@ In this mode, the server initializes with an empty dataset and waits for events 
 
 You can embed `markout` directly into proprietary trading execution engines or backtesting frameworks:
 
-Add `markout` to your `Cargo.toml`:
+Add `markout-app` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-markout = "1.0"
+markout-app = "1.0"
 tokio = { version = "1", features = ["full"] }
 ```
 

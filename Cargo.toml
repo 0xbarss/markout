@@ -1,5 +1,5 @@
 [package]
-name = "markout"
+name = "markout-app"
 version = "1.0.0"
 edition = "2021"
 authors = ["0xbarss"]
