@@ -132,5 +132,8 @@ export interface CoordinateConverter {
   priceToY(price: number): number | null;
   yToPrice(y: number): number | null;
   snapPoint?(x: number, y: number): Point | null;
+  getBarCount?(t1: number, t2: number): number | null;
+  getRangeVolume?(t1: number, t2: number): number | null;
 }
+
 

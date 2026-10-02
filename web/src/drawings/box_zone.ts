@@ -32,7 +32,7 @@ export function drawBoxZone(
   applyLineDash(ctx, d.lineStyle);
   ctx.strokeRect(left, top, width, height);
 
-  const label = d.label ?? "Zone";
+  const label = d.label ?? "";
   if (label.trim().length > 0) {
     ctx.setLineDash([]);
     ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";

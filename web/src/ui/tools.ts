@@ -42,6 +42,16 @@ export function mountDrawingTools(manager: DrawingManager): void {
     });
   }
 
+  const magnetBtn = document.getElementById("tool-magnet");
+  if (magnetBtn) {
+    magnetBtn.addEventListener("click", () => {
+      manager.toggleMagnet();
+    });
+    manager.onMagnetChange((enabled) => {
+      magnetBtn.classList.toggle("active", enabled);
+    });
+  }
+
   const undoBtn = document.getElementById("tool-undo");
   if (undoBtn) {
     undoBtn.addEventListener("click", () => {
@@ -77,12 +87,12 @@ export function mountDrawingTools(manager: DrawingManager): void {
   if (saveBtn) {
     saveBtn.addEventListener("click", () => {
       manager.save();
-      const origText = saveBtn.textContent;
-      saveBtn.textContent = "✓";
       saveBtn.classList.add("active");
+      const origTitle = saveBtn.title;
+      saveBtn.title = "Drawings saved!";
       setTimeout(() => {
-        saveBtn.textContent = origText;
         saveBtn.classList.remove("active");
+        saveBtn.title = origTitle;
       }, 1000);
     });
   }

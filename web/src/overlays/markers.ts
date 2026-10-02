@@ -2,8 +2,10 @@ import type { SeriesMarker, Time } from "lightweight-charts";
 import { fmtPrice, fmtSigned } from "../format.ts";
 import type { Bar, ExitReason, Trade } from "../types";
 import { locate } from "./snap.ts";
+import { getThemeTokens } from "../theme.ts";
 
-const UP = "#0ecb81", DOWN = "#f6465d", FLAT = "#848e9c";
+const tokens = getThemeTokens();
+const UP = tokens.up, DOWN = tokens.down, FLAT = tokens.muted;
 
 const REASON: Record<ExitReason, string> = {
   take_profit: "TP", trailing_stop: "TS", initial_stop: "SL", signal: "Sig", manual: "Man",

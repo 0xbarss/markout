@@ -50,12 +50,61 @@ async function main(): Promise<void> {
   const [initialBars, initialTrades, initialStats, initialSignals] = await loadAll();
   const chart = createTerminalChart($("chart"));
   const replay = new ReplayController();
-  mountReplayBar(replay);
+  const replayBar = mountReplayBar(replay);
   mountDrawingTools(chart.drawings);
   mountTradeOverlaySelector((mode) => {
     chart.setTradeOverlayMode(mode);
   });
   initMobileDrawer();
+
+  // Empty state copy command button
+  const copyBtn = document.getElementById("empty-copy-btn");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      const code = document.getElementById("empty-code")?.textContent ?? "";
+      try {
+        await navigator.clipboard.writeText(code);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
+      } catch {
+        // fallback
+      }
+    });
+  }
+
+  // Selected trade card
+  function updateTradeCard(t: Trade | null): void {
+    const card = $("selected-trade-card");
+    if (!t) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    $("tc-id").textContent = `#${t.id}`;
+    const sideEl = $("tc-side");
+    sideEl.textContent = t.direction === "buy" ? "Long" : "Short";
+    sideEl.className = `trade-card-badge ${t.direction}`;
+    $("tc-sym").textContent = t.symbol;
+    $("tc-entry").textContent = fmtPrice(t.entry_price);
+    $("tc-exit").textContent = t.exit_price !== null ? fmtPrice(t.exit_price) : "Open";
+    const pnlEl = $("tc-pnl");
+    pnlEl.textContent = t.exit_time !== null ? fmtSigned(t.pnl, 2, "$") : "—";
+    pnlEl.className = `trade-card-val ${signClass(t.pnl)}`;
+    const rEl = $("tc-r");
+    rEl.textContent = t.exit_time !== null ? `${fmtSigned(t.r_multiple, 2)} R` : "—";
+    rEl.className = `trade-card-val ${signClass(t.r_multiple)}`;
+    const mae = t.mae_pct !== null && !isNaN(t.mae_pct) ? `${fmtSigned(t.mae_pct, 2)}%` : "—";
+    const mfe = t.mfe_pct !== null && !isNaN(t.mfe_pct) ? `+${fmtPrice(t.mfe_pct)}%` : "—";
+    $("tc-mae-mfe").textContent = `${mae} / ${mfe}`;
+    const trailCount = t.sl_history.length;
+    const reasonText = t.exit_reason ? t.exit_reason.replace(/_/g, " ") : (t.exit_time ? "exit" : "open");
+    $("tc-reason").textContent = trailCount > 0 ? `${reasonText} (${trailCount} stop moves)` : reasonText;
+  }
+
+  $("tc-close")?.addEventListener("click", () => {
+    chart.setSelectedTrade(null);
+    updateTradeCard(null);
+  });
 
   let bars = initialBars;
   let trades = initialTrades;
@@ -71,7 +120,7 @@ async function main(): Promise<void> {
 
   renderSymbol(symbol);
   renderHeaderStats(stats);
-  renderStats(stats);
+  renderStats(stats, trades);
 
   const sigBtn = document.getElementById("signals-toggle-btn");
   if (sigBtn) {
@@ -93,9 +142,11 @@ async function main(): Promise<void> {
     (t) => {
       if (!t) {
         chart.setSelectedTrade(null);
+        updateTradeCard(null);
         return;
       }
       chart.setSelectedTrade(t.id);
+      updateTradeCard(t);
       const span = t.symbol === symbol ? spanOf(t, view) : null;
       if (!span) return;
       const pad = Math.max(20, Math.round((span[1] - span[0]) * 0.5));
@@ -132,6 +183,7 @@ async function main(): Promise<void> {
     }
     view = active === base || base === 0 ? bars : resample(bars, active, base);
     replay.setData(view, overlayTrades, overlaySignals);
+    replayBar.setTrades(overlayTrades, view);
     chart.fit();
     chart.drawings.setContext(symbol, active);
     renderTimeframes(base, active, (sec) => {
@@ -214,7 +266,7 @@ async function main(): Promise<void> {
         overlayTrades = trades.filter((x) => x.symbol === symbol);
         ledger.update(trades);
         stats = computeStats(trades);
-        renderStats(stats);
+        renderStats(stats, trades);
         renderHeaderStats(stats);
         if (t.symbol === symbol) {
           replay.updateTrade(t);
@@ -257,6 +309,7 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   const el = $("error");
-  el.textContent = `Failed to load data: ${err instanceof Error ? err.message : String(err)}`;
+  const msg = err instanceof Error ? err.message : String(err);
+  el.innerHTML = `<div><strong>Failed to load data:</strong> ${msg}</div><div style="font-size:11px;opacity:0.8;margin-top:4px">Check if the server is running on the expected port or verify input files with <code>--bars &lt;path&gt; --db &lt;path&gt;</code>.</div>`;
   el.hidden = false;
 });

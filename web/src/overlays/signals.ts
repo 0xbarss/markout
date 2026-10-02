@@ -3,8 +3,11 @@ import { fmtPrice } from "../format.ts";
 import type { Bar, Signal } from "../types.ts";
 import { locate } from "./snap.ts";
 
-const SIGNAL_BUY = "#00d2d3"; // Electric cyan
-const SIGNAL_SELL = "#ff4757"; // Coral red
+import { getThemeTokens } from "../theme.ts";
+
+const tokens = getThemeTokens();
+const SIGNAL_BUY = tokens.up;
+const SIGNAL_SELL = tokens.down;
 
 /** Signal entry arrows with strategy and entry price, snapped to bar times. */
 export function buildSignalMarkers(

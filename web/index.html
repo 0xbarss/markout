@@ -11,76 +11,242 @@
 <body>
   <div id="app">
     <header class="topbar">
-      <button id="mobile-tools-btn" class="mobile-tools-btn" title="Drawing tools" aria-label="Toggle drawing tools">✎</button>
-      <div class="brand">
-        <span class="brand-icon">∿</span>
-        <span class="brand-text">Markout</span>
-      </div>
-      <div id="symbol" class="symbol">—</div>
-      <div id="tf-pills" class="pills"></div>
-      <div class="trade-pills-wrap">
-        <span class="pill-label">Trades:</span>
-        <div id="trade-mode-pills" class="pills">
-          <button data-mode="focus" class="active" title="Focus selected trade or open positions">Focus</button>
-          <button data-mode="all" title="Show all trades">All</button>
-          <button data-mode="off" title="Hide all trades">Off</button>
+      <!-- Zone 1: Identity & Price -->
+      <div class="topbar-identity">
+        <button id="mobile-tools-btn" class="mobile-tools-btn" title="Toggle drawing tools" aria-label="Toggle drawing tools">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"></path>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+          </svg>
+        </button>
+        <div class="brand">
+          <span class="brand-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 16c3-6 5-8 8-2s5 7 10-2"></path>
+            </svg>
+          </span>
+          <span class="brand-text">Markout</span>
+        </div>
+        <div id="symbol" class="symbol">—</div>
+        <div class="ticker">
+          <span id="last-price">—</span>
+          <span id="last-change" class="chg"></span>
         </div>
       </div>
-      <button id="signals-toggle-btn" class="signals-btn active" title="Toggle strategy signals overlay" hidden>⚡ Signals</button>
-      <div class="spacer"></div>
-      <div class="ticker"><span id="last-price">—</span><span id="last-change" class="chg"></span></div>
-      <div class="stat"><span class="lbl">Equity</span><span id="equity">—</span></div>
-      <div class="stat"><span class="lbl">PnL</span><span id="pnl">—</span></div>
+
+      <!-- Zone 2: View Controls -->
+      <div class="topbar-controls">
+        <div id="tf-pills" class="pills"></div>
+        <div class="trade-pills-wrap">
+          <span class="pill-label">Trades:</span>
+          <div id="trade-mode-pills" class="pills">
+            <button data-mode="focus" class="active" title="Focus selected trade or open positions" aria-label="Focus mode">Focus</button>
+            <button data-mode="all" title="Show all trades" aria-label="Show all trades">All</button>
+            <button data-mode="off" title="Hide all trades" aria-label="Hide all trades">Off</button>
+          </div>
+        </div>
+        <button id="signals-toggle-btn" class="signals-btn active" title="Toggle strategy signals overlay" aria-label="Toggle strategy signals overlay" hidden>
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          Signals
+        </button>
+      </div>
+
+      <!-- Zone 3: Account Stats -->
+      <div class="topbar-account">
+        <div class="stat"><span class="lbl">Equity</span><span id="equity">—</span></div>
+        <div class="stat"><span class="lbl">PnL</span><span id="pnl">—</span></div>
+      </div>
     </header>
 
     <aside class="tools" aria-label="Drawing tools">
-      <button id="tool-cursor" class="active" title="Crosshair / Select">✛</button>
-      <button id="tool-trendline" title="Trendline">╱</button>
-      <button id="tool-ray" title="Ray">⟶</button>
-      <button id="tool-horizontal" title="Horizontal line">─</button>
-      <button id="tool-vertical" title="Vertical line">│</button>
-      <button id="tool-arrow" title="Arrow">↗</button>
-      <button id="tool-box" title="Zone box">□</button>
-      <button id="tool-fibonacci" title="Fibonacci">≡</button>
-      <button id="tool-position" title="Position Risk-Reward">⤢</button>
-      <button id="tool-measure" title="Measure ruler">📏</button>
-      <button id="tool-text" title="Text note">T</button>
+      <button id="tool-cursor" class="active" title="Crosshair / Select" aria-label="Crosshair / Select">
+        <svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20"></path></svg>
+      </button>
+      <button id="tool-trendline" title="Trendline" aria-label="Trendline">
+        <svg viewBox="0 0 24 24"><line x1="4" y1="20" x2="20" y2="4"></line></svg>
+      </button>
+      <button id="tool-ray" title="Ray" aria-label="Ray">
+        <svg viewBox="0 0 24 24"><line x1="4" y1="18" x2="19" y2="6"></line><polyline points="13 6 19 6 19 12"></polyline></svg>
+      </button>
+      <button id="tool-horizontal" title="Horizontal line" aria-label="Horizontal line">
+        <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"></line></svg>
+      </button>
+      <button id="tool-vertical" title="Vertical line" aria-label="Vertical line">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="3" x2="12" y2="21"></line></svg>
+      </button>
+      <button id="tool-arrow" title="Arrow" aria-label="Arrow">
+        <svg viewBox="0 0 24 24"><line x1="5" y1="19" x2="18" y2="6"></line><polyline points="10 6 18 6 18 14"></polyline></svg>
+      </button>
+      <button id="tool-box" title="Zone box" aria-label="Zone box">
+        <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1"></rect></svg>
+      </button>
+      <button id="tool-fibonacci" title="Fibonacci" aria-label="Fibonacci">
+        <svg viewBox="0 0 24 24"><line x1="3" y1="5" x2="21" y2="5"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="19" x2="21" y2="19"></line></svg>
+      </button>
+      <button id="tool-position" title="Position Risk-Reward" aria-label="Position Risk-Reward">
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="8" rx="1" stroke="currentColor"></rect><rect x="4" y="12" width="16" height="8" rx="1" stroke="currentColor"></rect></svg>
+      </button>
+      <button id="tool-measure" title="Measure ruler" aria-label="Measure ruler">
+        <svg viewBox="0 0 24 24"><path d="M21.3 8.7 15.3 2.7c-.4-.4-1-.4-1.4 0L2.7 13.9c-.4.4-.4 1 0 1.4l6 6c.4.4 1 .4 1.4 0l11.2-11.2c.4-.4.4-1 0-1.4zM7.5 13.5l1.5-1.5M10.5 16.5l1.5-1.5M13.5 19.5l1.5-1.5"></path></svg>
+      </button>
+      <button id="tool-text" title="Text note" aria-label="Text note">
+        <svg viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="12" y1="4" x2="12" y2="20"></line><line x1="9" y1="20" x2="15" y2="20"></line></svg>
+      </button>
+      <button id="tool-magnet" title="Magnet Mode (Snaps to OHLC bars) [Ctrl]" aria-label="Magnet Mode">
+        <svg viewBox="0 0 24 24"><path d="M4 4v7a8 8 0 0 0 16 0V4"></path><path d="M4 8h5"></path><path d="M15 8h5"></path></svg>
+      </button>
       <div class="tool-sep"></div>
-      <button id="tool-undo" title="Undo (Ctrl+Z)">↺</button>
-      <button id="tool-settings" title="Drawing Settings (Double-click drawing)" disabled>⚙</button>
-      <button id="tool-delete" title="Delete selected (Del / Backspace)" disabled>⌫</button>
-      <button id="tool-save" title="Save drawings">💾</button>
-      <button id="tool-clear" title="Clear all drawings">🗑</button>
+      <button id="tool-undo" title="Undo (Ctrl+Z)" aria-label="Undo">
+        <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+      </button>
+      <button id="tool-settings" title="Drawing Settings (Double-click drawing)" aria-label="Drawing Settings" disabled>
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      </button>
+      <button id="tool-delete" title="Delete selected (Del / Backspace)" aria-label="Delete selected" disabled>
+        <svg viewBox="0 0 24 24"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path><line x1="18" y1="9" x2="12" y2="15"></line><line x1="12" y1="9" x2="18" y2="15"></line></svg>
+      </button>
+      <button id="tool-save" title="Save drawings" aria-label="Save drawings">
+        <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+      </button>
+      <button id="tool-clear" title="Clear all drawings" aria-label="Clear all drawings">
+        <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+      </button>
     </aside>
-
-
 
     <main class="chart-area">
       <div id="legend" class="legend"></div>
       <div id="chart"></div>
-      <div id="empty" class="empty" hidden>No bars loaded. Start markout with <code>--bars &lt;path&gt;</code>.</div>
+
+      <!-- Selected Trade Card Overlay -->
+      <div id="selected-trade-card" class="selected-trade-card" hidden>
+        <div class="trade-card-header">
+          <div class="trade-card-title">
+            <span id="tc-id">#0</span>
+            <span id="tc-side" class="trade-card-badge buy">Long</span>
+            <span id="tc-sym">BTCUSDT</span>
+          </div>
+          <button id="tc-close" class="trade-card-close" title="Close" aria-label="Close trade card">✕</button>
+        </div>
+        <div class="trade-card-grid">
+          <div class="trade-card-field">
+            <span class="trade-card-lbl">Entry</span>
+            <span id="tc-entry" class="trade-card-val">—</span>
+          </div>
+          <div class="trade-card-field">
+            <span class="trade-card-lbl">Exit</span>
+            <span id="tc-exit" class="trade-card-val">—</span>
+          </div>
+          <div class="trade-card-field">
+            <span class="trade-card-lbl">PnL</span>
+            <span id="tc-pnl" class="trade-card-val">—</span>
+          </div>
+          <div class="trade-card-field">
+            <span class="trade-card-lbl">Return</span>
+            <span id="tc-r" class="trade-card-val">—</span>
+          </div>
+          <div class="trade-card-field">
+            <span class="trade-card-lbl">MAE / MFE</span>
+            <span id="tc-mae-mfe" class="trade-card-val">—</span>
+          </div>
+          <div class="trade-card-field">
+            <span class="trade-card-lbl">Exit Reason</span>
+            <span id="tc-reason" class="trade-card-val">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actionable First-Run Empty State -->
+      <div id="empty" class="empty" hidden>
+        <div class="empty-card">
+          <div class="empty-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+            <h3 class="empty-title">No Bars Loaded</h3>
+          </div>
+          <p class="empty-desc">Markout requires OHLCV price series to render the charting terminal. You can start it with sample data or your own records:</p>
+          <div class="empty-code-wrap">
+            <code id="empty-code">cargo run -- --db examples/trades.jsonl --bars examples/bars.csv</code>
+            <button id="empty-copy-btn" class="empty-copy-btn" title="Copy command" aria-label="Copy command">Copy</button>
+          </div>
+          <div class="empty-formats">
+            <strong>Accepted Bars:</strong> CSV (<code>time,open,high,low,close,volume</code>), directory of CSV files, or SQLite.<br>
+            <strong>Accepted Trades:</strong> JSONL, JSON array, CSV, or SQLite <code>trades</code> table.
+          </div>
+        </div>
+      </div>
+
+      <!-- Replay Controls Bar -->
       <div class="replay" id="replay-bar">
-        <button id="replay-play" title="Play / Pause">▶ Play</button>
-        <button id="replay-prev" title="Step backward">⏮</button>
-        <button id="replay-next" title="Step forward">⏭</button>
-        <button id="replay-speed" class="speed-btn" title="Replay speed">1x</button>
-        <input id="replay-slider" type="range" min="0" max="0" value="0" aria-label="Replay position" />
+        <button id="replay-play" title="Play / Pause (Space)" aria-label="Play or pause replay">
+          <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          <span id="replay-play-text">Play</span>
+        </button>
+        <button id="replay-prev" title="Step backward (Left Arrow)" aria-label="Step backward">
+          <svg viewBox="0 0 24 24"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
+        </button>
+        <button id="replay-next" title="Step forward (Right Arrow)" aria-label="Step forward">
+          <svg viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
+        </button>
+        <button id="replay-speed" class="speed-btn" title="Replay speed" aria-label="Replay speed">1x</button>
+        <div class="replay-slider-wrap">
+          <canvas id="replay-ticks-canvas" class="replay-ticks-canvas"></canvas>
+          <input id="replay-slider" type="range" min="0" max="0" value="0" aria-label="Replay position timeline" />
+        </div>
         <span id="replay-counter" class="counter">0 / 0</span>
-        <button id="replay-live" class="live-btn" title="Jump to latest candle">Live</button>
+        <button id="replay-live" class="live-btn" title="Jump to latest candle" aria-label="Jump to latest candle">Live</button>
       </div>
     </main>
 
+    <!-- Redesigned Performance & Analytics Panel -->
     <aside class="panel">
       <h3>Performance Summary</h3>
+      <div class="panel-hero">
+        <span class="panel-hero-label">Net Realized PnL</span>
+        <span id="hero-pnl" class="panel-hero-value">—</span>
+      </div>
+
+      <div class="panel-sparkline-wrap">
+        <div class="panel-sparkline-title">
+          <span>Cumulative Equity</span>
+          <span id="sparkline-drawdown" class="sparkline-val"></span>
+        </div>
+        <svg id="equity-sparkline" class="panel-sparkline-svg" viewBox="0 0 190 40" preserveAspectRatio="none">
+          <path id="sparkline-path" fill="none" stroke="var(--accent)" stroke-width="1.8" d=""></path>
+        </svg>
+      </div>
+
+      <div class="panel-r-dist-wrap">
+        <span class="panel-hero-label">R-Multiple Distribution</span>
+        <div id="r-dist-bars" class="panel-r-dist-bars"></div>
+      </div>
+
+      <div class="panel-exits-wrap">
+        <span class="panel-hero-label">Exit Reasons</span>
+        <div id="exit-pills" class="panel-exit-pills"></div>
+      </div>
+
       <dl id="stats"></dl>
     </aside>
 
     <section class="ledger">
-      <div class="sheet-handle" id="sheet-handle" role="button" aria-label="Toggle trade sheet"><span class="handle-bar"></span></div>
+      <div class="sheet-handle" id="sheet-handle" role="button" aria-label="Toggle trade sheet">
+        <span class="handle-bar"></span>
+        <div id="mobile-summary-strip" class="mobile-summary-strip">
+          <span id="mob-wr">WR: —</span>
+          <span id="mob-r">R: —</span>
+          <span id="mob-pnl">PnL: —</span>
+        </div>
+      </div>
       <div class="tabs" id="tabs"></div>
       <div class="table-wrap"><table id="ledger"></table></div>
     </section>
   </div>
+
   <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
   <div id="error" class="error" hidden></div>
 

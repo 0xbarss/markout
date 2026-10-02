@@ -1,5 +1,6 @@
 import { h } from "../dom.ts";
 import type { DrawingManager } from "../drawings/manager.ts";
+import { formatRgba, parseColor } from "../drawings/style_utils.ts";
 import type { Drawing, LineStyleType, Point } from "../drawings/types.ts";
 import { showDialog } from "./dialog.ts";
 
@@ -35,35 +36,101 @@ function dateLocalToTimestamp(str: string): number | null {
 }
 
 function createColorPicker(initialColor: string, onChange: (col: string) => void): HTMLElement {
-  const wrap = h("div", "color-picker-wrap");
+  const parsed = parseColor(initialColor);
+  let currentHex = parsed.hex;
+  let currentAlpha = parsed.alpha;
+
+  const container = h("div", "color-picker-box");
+  const topRow = h("div", "color-picker-wrap");
+
+  // Checkerboard background wrapper for transparency visualization
+  const swatchWrap = h("div", "color-preview-swatch-wrap");
+  const preview = h("span", "color-preview-swatch");
+  swatchWrap.append(preview);
+
   const input = h("input", "color-native-input") as HTMLInputElement;
   input.type = "color";
-  input.value = initialColor.startsWith("#") && initialColor.length === 7 ? initialColor : "#f7a600";
+  input.value = currentHex;
 
-  const preview = h("span", "color-preview-swatch");
-  preview.style.backgroundColor = initialColor;
-
-  input.addEventListener("input", () => {
-    preview.style.backgroundColor = input.value;
-    onChange(input.value);
+  // Clicking swatch opens native color dialog
+  swatchWrap.title = "Click to pick custom color";
+  swatchWrap.addEventListener("click", () => {
+    input.click();
   });
 
   const swatches = h("div", "color-presets");
+
+  const notifyChange = () => {
+    const formatted = formatRgba(currentHex, currentAlpha);
+    preview.style.backgroundColor = formatted;
+    input.value = currentHex;
+    alphaSlider.value = String(Math.round(currentAlpha * 100));
+    alphaValText.textContent = `${Math.round(currentAlpha * 100)}%`;
+    onChange(formatted);
+  };
+
+  input.addEventListener("input", () => {
+    currentHex = input.value;
+    notifyChange();
+  });
+
   for (const c of PRESET_COLORS) {
     const sw = h("button", "color-preset-btn") as HTMLButtonElement;
     sw.type = "button";
     sw.style.backgroundColor = c;
     sw.title = c;
     sw.addEventListener("click", () => {
-      input.value = c;
-      preview.style.backgroundColor = c;
-      onChange(c);
+      currentHex = c;
+      notifyChange();
     });
     swatches.append(sw);
   }
 
-  wrap.append(preview, input, swatches);
-  return wrap;
+  // Native color trigger button
+  const customBtn = h("button", "color-custom-btn", "🎨") as HTMLButtonElement;
+  customBtn.type = "button";
+  customBtn.title = "Custom Color";
+  customBtn.addEventListener("click", () => input.click());
+
+  topRow.append(swatchWrap, input, swatches, customBtn);
+
+  // Opacity Row
+  const opacityRow = h("div", "color-opacity-row");
+  const opacityTop = h("div", "color-opacity-top");
+  const opacityLabel = h("span", "color-opacity-label", "Opacity");
+  const alphaValText = h("span", "color-opacity-val", `${Math.round(currentAlpha * 100)}%`);
+
+  const chipsWrap = h("div", "color-opacity-presets");
+  for (const pct of [15, 30, 60, 100]) {
+    const chip = h("button", "color-opacity-chip", `${pct}%`) as HTMLButtonElement;
+    chip.type = "button";
+    chip.addEventListener("click", () => {
+      currentAlpha = pct / 100;
+      notifyChange();
+    });
+    chipsWrap.append(chip);
+  }
+
+  opacityTop.append(opacityLabel, alphaValText, chipsWrap);
+
+  const alphaSlider = h("input", "color-opacity-slider") as HTMLInputElement;
+  alphaSlider.type = "range";
+  alphaSlider.min = "0";
+  alphaSlider.max = "100";
+  alphaSlider.value = String(Math.round(currentAlpha * 100));
+
+  alphaSlider.addEventListener("input", () => {
+    currentAlpha = parseInt(alphaSlider.value, 10) / 100;
+    notifyChange();
+  });
+
+  opacityRow.append(opacityTop, alphaSlider);
+
+  // Initial style apply
+  preview.style.backgroundColor = formatRgba(currentHex, currentAlpha);
+
+  container.append(topRow, opacityRow);
+  return container;
 }
 
 function createLineWidthSelect(current: number, onChange: (w: number) => void): HTMLElement {
@@ -208,7 +275,8 @@ export function openDrawingSettingsDialog(drawing: Drawing, manager: DrawingMana
   if (draft.type === "box_zone") {
     const labelInput = h("input", "modal-input") as HTMLInputElement;
     labelInput.type = "text";
-    labelInput.value = draft.label ?? "Zone";
+    labelInput.placeholder = "Optional label";
+    labelInput.value = draft.label ?? "";
     labelInput.addEventListener("input", () => {
       draft.label = labelInput.value;
       updatePreview();
@@ -296,7 +364,7 @@ export function openDrawingSettingsDialog(drawing: Drawing, manager: DrawingMana
     const rightWrap = h("label", "dialog-checkbox-wrap");
     const rightChk = h("input") as HTMLInputElement;
     rightChk.type = "checkbox";
-    rightChk.checked = draft.extendRight !== false;
+    rightChk.checked = !!draft.extendRight;
     rightChk.addEventListener("change", () => {
       draft.extendRight = rightChk.checked;
       updatePreview();

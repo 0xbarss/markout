@@ -2,14 +2,23 @@
 
 An interactive financial time-series visualizer, session replay engine, and live trading monitor. Ships as a single binary with an embedded web interface.
 
-## Features (roadmap)
+## Features
 
-- Dark-mode derivatives terminal layout, responsive for desktop and mobile
-- Canvas-based candlestick charting with volume pane
-- Candle-by-candle replay with speed control and a hindsight-free "ghost" mode
-- Trade lifecycle overlays with dynamic trailing stop and take-profit paths
-- Drawing suite: trendlines, zones, retracements, risk/reward and measurement tools
-- Live streaming over a generic event channel; embeddable as a Rust library
+### Shipped
+- **Dense product terminal layout**: Left-anchored 3-column / 3-row grid with responsive desktop, mobile drawer, and bottom sheet ledger.
+- **Canvas-based candlestick charting**: Volume pane, custom indicators, and dynamic crosshair synchronization.
+- **Session replay engine**: Candle-by-candle replay, speed controls, timeline scrubber with trade markers, and keyboard controls (`Space`, `←`, `→`).
+- **Hindsight-free ghost mode**: Simulates real-time execution by masking future bars, trailing stop advances, and exits until the replay cursor reaches them.
+- **Trade lifecycle overlays**: Step-wise trailing stop paths, take-profit levels, entry/exit markers, and selected trade analysis card.
+- **Performance analytics panel**: Hero Net PnL, cumulative equity sparkline, R-multiple distribution histogram, and exit reason breakdown.
+- **Trade ledger with MAE / MFE**: Granular maximum adverse and favorable excursion metrics, duration, and in-cell R-multiple micro-bars.
+- **Interactive drawing suite**: Trendlines, rays, horizontal/vertical levels, Fibonacci retracements, risk/reward position brackets, zones, measurement rulers, and text notes.
+- **Live streaming daemon**: Generic event bus with WebSocket streaming (`/ws/stream`) and REST API.
+
+### Planned
+- Parquet bar file ingestion
+- Multi-chart synchronized split layouts
+- Export annotated replay sessions to video / animated GIF
 
 ## Usage
 

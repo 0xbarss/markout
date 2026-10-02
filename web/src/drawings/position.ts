@@ -50,31 +50,41 @@ export function drawPosition(
   ctx.fillRect(left, topStop, width, heightStop);
   ctx.strokeRect(left, topStop, width, heightStop);
 
-  // Center badge with R:R
-  const badgeText = `R:R ${rr} | TP ${fmtSigned(targetPct, 2)}% | SL ${fmtSigned(stopPct, 2)}%`;
-  ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  // Center badge with compact R:R (avoids blocking candles)
+  const badgeText = `R:R ${rr}`;
+  ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
   const metrics = ctx.measureText(badgeText);
-  const badgeW = metrics.width + 12;
-  const badgeH = 20;
-  const badgeX = left + Math.max(0, (width - badgeW) / 2);
-  const badgeY = yEntry - badgeH / 2;
+  const badgeW = metrics.width + 10;
+  const badgeH = 18;
+  const badgeX = Math.round(left + (width - badgeW) / 2);
+  const badgeY = Math.round(yEntry - badgeH / 2);
 
-  ctx.fillStyle = "#161b22";
+  ctx.fillStyle = "rgba(22, 27, 34, 0.88)";
   ctx.strokeStyle = "#262932";
 
   ctx.beginPath();
-  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3);
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3);
+  } else {
+    ctx.rect(badgeX, badgeY, badgeW, badgeH);
+  }
   ctx.fill();
   ctx.stroke();
 
   ctx.fillStyle = "#eaecef";
-  ctx.fillText(badgeText, badgeX + 6, badgeY + 14);
+  ctx.textBaseline = "middle";
+  ctx.fillText(badgeText, badgeX + 5, yEntry);
 
-  // Price tags on right
-  ctx.fillStyle = "#0ecb81";
-  ctx.fillText(`TP ${fmtPrice(d.targetPrice)}`, left + width + 4, yTarget + 4);
-  ctx.fillStyle = "#f6465d";
-  ctx.fillText(`SL ${fmtPrice(d.stopPrice)}`, left + width + 4, yStop + 4);
+  // Price tags on right with percentages
+  const tpTag = `TP ${fmtPrice(d.targetPrice)} (${fmtSigned(targetPct, 2)}%)`;
+  const slTag = `SL ${fmtPrice(d.stopPrice)} (${fmtSigned(stopPct, 2)}%)`;
+
+  ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = targetColor;
+  ctx.fillText(tpTag, left + width + 6, yTarget);
+  ctx.fillStyle = stopColor;
+  ctx.fillText(slTag, left + width + 6, yStop);
 
   ctx.restore();
 }

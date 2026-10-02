@@ -23,10 +23,30 @@ export function renderTimeframes(base: number, active: number, onSelect: (sec: n
 }
 
 
+let lastPriceVal: number | null = null;
+let flashTimeout: any = null;
+
+function flashTicker(newPrice: number): void {
+  const tickerEl = document.querySelector(".ticker");
+  if (!tickerEl) return;
+  if (lastPriceVal !== null && newPrice !== lastPriceVal) {
+    const isUp = newPrice > lastPriceVal;
+    tickerEl.classList.remove("flash-up", "flash-down");
+    void (tickerEl as HTMLElement).offsetWidth;
+    tickerEl.classList.add(isUp ? "flash-up" : "flash-down");
+    clearTimeout(flashTimeout);
+    flashTimeout = setTimeout(() => {
+      tickerEl.classList.remove("flash-up", "flash-down");
+    }, 350);
+  }
+  lastPriceVal = newPrice;
+}
+
 export function renderTicker(bars: Bar[]): void {
   const last = bars[bars.length - 1];
   if (!last) return;
   const prev = bars[bars.length - 2];
+  flashTicker(last.close);
   $("last-price").textContent = fmtPrice(last.close);
   if (prev && prev.close !== 0) {
     const pct = ((last.close - prev.close) / prev.close) * 100;
@@ -37,6 +57,7 @@ export function renderTicker(bars: Bar[]): void {
 }
 
 export function renderTick(tick: Tick, prevClose?: number): void {
+  flashTicker(tick.price);
   $("last-price").textContent = fmtPrice(tick.price);
   if (prevClose && prevClose !== 0) {
     const pct = ((tick.price - prevClose) / prevClose) * 100;

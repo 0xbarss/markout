@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { drawFibonacci, FIB_LEVELS } from "../src/drawings/fibonacci.ts";
 import { DrawingManager } from "../src/drawings/manager.ts";
+import { formatRgba, parseColor } from "../src/drawings/style_utils.ts";
 import type { CoordinateConverter, Drawing, FibonacciDrawing } from "../src/drawings/types.ts";
 
 class MockCanvas {
@@ -340,5 +341,131 @@ test("drawFibonacci: respects extendLeft and extendRight bounds", () => {
     assert.equal(seg.x2, 800);
   }
 });
+
+test("drawing manager: position drawing can be selected and re-selected after deselecting", () => {
+  const canvas = new MockCanvas();
+  const mgr = new DrawingManager(canvas as any, mockConverter);
+
+  const posDrawing: Drawing = {
+    id: "pos_test",
+    type: "position",
+    side: "long",
+    entry: { time: 1_700_000_100, price: 500 }, // x=100, y=500
+    targetPrice: 600,                           // y=400
+    stopPrice: 400,                             // y=600
+    endTime: 1_700_000_200,                     // x=200
+  };
+
+  mgr.addDrawing(posDrawing);
+  assert.equal(mgr.getSelectedDrawing()?.id, "pos_test");
+
+  // Click somewhere far away to deselect (x=700, y=100)
+  canvas.trigger("pointerdown", { clientX: 700, clientY: 100 });
+  assert.equal(mgr.getSelectedDrawing(), null, "drawing should be deselected");
+
+  // Click back inside the position bracket (x=150, y=450)
+  canvas.trigger("pointerdown", { clientX: 150, clientY: 450 });
+  assert.equal(mgr.getSelectedDrawing()?.id, "pos_test", "position drawing should be re-selected");
+});
+
+test("drawing manager: ray drawing can be selected beyond defining anchor points", () => {
+  const canvas = new MockCanvas();
+  const mgr = new DrawingManager(canvas as any, mockConverter);
+
+  const ray: Drawing = {
+    id: "ray_test",
+    type: "ray",
+    p1: { time: 1_700_000_100, price: 500 }, // x=100, y=500
+    p2: { time: 1_700_000_200, price: 500 }, // x=200, y=500 (horizontal ray to the right)
+  };
+
+  mgr.addDrawing(ray);
+  // Deselect
+  canvas.trigger("pointerdown", { clientX: 700, clientY: 100 });
+  assert.equal(mgr.getSelectedDrawing(), null);
+
+  // Click on the extended ray far past p2 (x=500, y=500)
+  canvas.trigger("pointerdown", { clientX: 500, clientY: 500 });
+  assert.equal(mgr.getSelectedDrawing()?.id, "ray_test", "ray should be selectable beyond p2");
+});
+
+test("style_utils: parseColor and formatRgba correctly parse and format hex and opacity", () => {
+  // Hex without alpha
+  assert.deepEqual(parseColor("#f7a600"), { hex: "#f7a600", alpha: 1 });
+
+  // 8-digit hex (#rrggbbaa)
+  const parsed8 = parseColor("#f7a60080");
+  assert.equal(parsed8.hex, "#f7a600");
+  assert.equal(Math.round(parsed8.alpha * 100), 50);
+
+  // rgba string
+  const parsedRgba = parseColor("rgba(14, 203, 129, 0.35)");
+  assert.equal(parsedRgba.hex, "#0ecb81");
+  assert.equal(parsedRgba.alpha, 0.35);
+
+  // formatRgba with alpha=1 returns hex
+  assert.equal(formatRgba("#0ecb81", 1), "#0ecb81");
+
+  // formatRgba with alpha < 1 returns rgba(...)
+  assert.equal(formatRgba("#0ecb81", 0.5), "rgba(14, 203, 129, 0.5)");
+  assert.equal(formatRgba("#f6465d", 0.15), "rgba(246, 70, 93, 0.15)");
+});
+
+test("drawing manager: magnet mode toggles and snaps only when active", () => {
+  let snapCalled = false;
+  const customConverter: CoordinateConverter = {
+    ...mockConverter,
+    snapPoint: (x, y) => {
+      snapCalled = true;
+      return { time: 1_700_000_999, price: 999 };
+    },
+  };
+  const canvas = new MockCanvas();
+  const mgr = new DrawingManager(canvas as any, customConverter);
+
+  // Default is off
+  assert.equal(mgr.isMagnet(), false);
+
+  mgr.setTool("trendline");
+  snapCalled = false;
+  canvas.trigger("pointerdown", { clientX: 100, clientY: 100, ctrlKey: false });
+  assert.equal(snapCalled, false, "snapPoint should not be called when magnet is off");
+
+  // Toggle magnet ON
+  mgr.setMagnet(true);
+  assert.equal(mgr.isMagnet(), true);
+
+  snapCalled = false;
+  canvas.trigger("pointerdown", { clientX: 100, clientY: 100, ctrlKey: false });
+  assert.equal(snapCalled, true, "snapPoint should be called when magnet is on");
+
+  // Holding Ctrl inverts magnet mode (off when on)
+  snapCalled = false;
+  canvas.trigger("pointerdown", { clientX: 100, clientY: 100, ctrlKey: true });
+  assert.equal(snapCalled, false, "Ctrl key should invert magnet mode");
+});
+
+test("drawing manager: measure tool creates temporary overlay and dismisses on click", () => {
+  const canvas = new MockCanvas();
+  const mgr = new DrawingManager(canvas as any, mockConverter);
+
+  mgr.setTool("measure");
+  assert.equal(mgr.getActiveTool(), "measure");
+
+  // Click point 1 and point 2
+  canvas.trigger("pointerdown", { clientX: 100, clientY: 100 });
+  canvas.trigger("pointerdown", { clientX: 200, clientY: 200 });
+
+  // Measure completes and returns to cursor mode
+  assert.equal(mgr.getActiveTool(), "cursor");
+  // Does not pollute permanent drawings list
+  assert.equal(mgr.getDrawings().length, 0, "measure tool should not add permanent drawing");
+
+  // Clicking anywhere dismisses active measure
+  canvas.trigger("pointerdown", { clientX: 300, clientY: 300 });
+  assert.equal(mgr.getDrawings().length, 0);
+});
+
+
 
 

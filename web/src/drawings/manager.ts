@@ -35,8 +35,10 @@ export class DrawingManager {
   private editListeners = new Set<(selected: Drawing) => void>();
   private textPromptHandler: ((initialText: string) => Promise<string | null>) | null = null;
   private copiedDrawingId: string | null = null;
-
-
+  private magnetEnabled: boolean = false;
+  private magnetListeners = new Set<(enabled: boolean) => void>();
+  private activeMeasure: Drawing | null = null;
+  private lastSnappedPoint: Point | null = null;
 
   constructor(canvas: HTMLCanvasElement, conv: CoordinateConverter) {
     this.canvas = canvas;
@@ -45,9 +47,44 @@ export class DrawingManager {
     this.ctx = ctx;
     this.conv = conv;
 
+    try {
+      if (typeof localStorage !== "undefined") {
+        this.magnetEnabled = localStorage.getItem("markout:magnet") === "true";
+      }
+    } catch (_) {}
+
     this.bindEvents();
     this.bindKeyboard();
     this.setTool("cursor");
+  }
+
+  public isMagnet(): boolean {
+    return this.magnetEnabled;
+  }
+
+  public setMagnet(enabled: boolean): void {
+    if (this.magnetEnabled === enabled) return;
+    this.magnetEnabled = enabled;
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("markout:magnet", String(enabled));
+      }
+    } catch (_) {}
+    for (const cb of this.magnetListeners) {
+      cb(this.magnetEnabled);
+    }
+    this.render();
+  }
+
+  public toggleMagnet(): boolean {
+    this.setMagnet(!this.magnetEnabled);
+    return this.magnetEnabled;
+  }
+
+  public onMagnetChange(cb: (enabled: boolean) => void): () => void {
+    this.magnetListeners.add(cb);
+    cb(this.magnetEnabled);
+    return () => this.magnetListeners.delete(cb);
   }
 
   public setContext(symbol: string, _timeframe?: number): void {
@@ -62,6 +99,9 @@ export class DrawingManager {
   }
 
   public setTool(tool: DrawingTool): void {
+    if (tool !== "measure") {
+      this.activeMeasure = null;
+    }
     this.activeTool = tool;
     this.pendingPoint = null;
     this.previewPoint = null;
@@ -335,12 +375,33 @@ export class DrawingManager {
       }
     }
 
+    if (this.activeMeasure) {
+      this.drawSingle(this.activeMeasure, width, height);
+    }
+
     if (this.pendingPoint && this.previewPoint) {
       const preview = this.createPreviewDrawing(this.pendingPoint, this.previewPoint);
       if (preview) {
         this.ctx.save();
         this.ctx.globalAlpha = 0.7;
         this.drawSingle(preview, width, height);
+        this.ctx.restore();
+      }
+    }
+
+    // Magnet snap target indicator
+    if (this.lastSnappedPoint && (this.activeTool !== "cursor" || this.draggingHandle || this.draggingDrawing)) {
+      const sx = this.conv.timeToX(this.lastSnappedPoint.time);
+      const sy = this.conv.priceToY(this.lastSnappedPoint.price);
+      if (sx !== null && sy !== null) {
+        this.ctx.save();
+        this.ctx.strokeStyle = "#29b6f6";
+        this.ctx.fillStyle = "rgba(41, 182, 246, 0.35)";
+        this.ctx.lineWidth = 1.5;
+        this.ctx.beginPath();
+        this.ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
         this.ctx.restore();
       }
     }
@@ -409,8 +470,10 @@ export class DrawingManager {
         return [d.p1, d.p2];
       case "box_zone":
         return [d.p1, d.p2, { time: d.p1.time, price: d.p2.price }, { time: d.p2.time, price: d.p1.price }];
-      case "horizontal":
-        return d.time ? [{ time: d.time, price: d.price }] : [];
+      case "horizontal": {
+        const centerTime = this.conv.xToTime((this.canvas.parentElement?.clientWidth ?? this.canvas.width) / 2);
+        return [{ time: d.time ?? centerTime ?? 0, price: d.price }];
+      }
       case "vertical":
         return [{ time: d.time, price: this.conv.yToPrice(50) ?? 0 }];
       case "position":
@@ -433,7 +496,7 @@ export class DrawingManager {
       case "box_zone":
         return { id: "preview", type: "box_zone", p1, p2 };
       case "fibonacci":
-        return { id: "preview", type: "fibonacci", p1, p2, extendRight: true, extendLeft: false };
+        return { id: "preview", type: "fibonacci", p1, p2, extendRight: false, extendLeft: false };
       case "position": {
         const isLong = p2.price >= p1.price;
         const delta = Math.abs(p2.price - p1.price);
@@ -465,6 +528,10 @@ export class DrawingManager {
         e.preventDefault();
         this.deleteSelected();
       } else if (e.key === "Escape") {
+        if (this.activeMeasure) {
+          this.activeMeasure = null;
+          this.render();
+        }
         if (this.pendingPoint) {
           this.pendingPoint = null;
           this.previewPoint = null;
@@ -525,11 +592,61 @@ export class DrawingManager {
       });
 
       parent.addEventListener("pointerdown", (e) => {
-        if (e.target instanceof Element && (e.target.closest(".drawing-floating-toolbar") || e.target.closest(".modal-backdrop") || e.target.closest(".modal-dialog"))) {
+        if (e.target instanceof Element && (
+          e.target.closest(".drawing-floating-toolbar") ||
+          e.target.closest(".modal-backdrop") ||
+          e.target.closest(".modal-dialog") ||
+          e.target.closest(".chart-axis-corner") ||
+          e.target.closest("#selected-trade-card")
+        )) {
           return;
         }
-        if (e.target !== this.canvas && this.selectedId) {
-          this.selectDrawing(null);
+
+        if (this.activeMeasure) {
+          this.activeMeasure = null;
+          this.render();
+        }
+
+        if (e.shiftKey && this.activeTool === "cursor") {
+          const pt = this.eventToPoint(e);
+          if (pt) {
+            this.setTool("measure");
+            this.pendingPoint = pt;
+            return;
+          }
+        }
+
+        if (this.activeTool === "cursor") {
+          const rect = this.canvas.getBoundingClientRect();
+          const px = e.clientX - rect.left;
+          const py = e.clientY - rect.top;
+
+          const handleHit = this.checkHandleHit(px, py);
+          const hit = !handleHit ? this.hitTest(px, py) : null;
+
+          if (handleHit) {
+            this.pushUndo();
+            this.draggingHandle = handleHit;
+            this.canvas.style.pointerEvents = "auto";
+            try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+            return;
+          }
+
+          if (hit) {
+            this.pushUndo();
+            this.selectDrawing(hit.id);
+            this.canvas.style.pointerEvents = "auto";
+            const pt = this.eventToPoint(e);
+            if (pt) {
+              this.draggingDrawing = { drawingId: hit.id, startX: px, startY: py, startPt: pt };
+              try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+            }
+            return;
+          }
+
+          if (e.target !== this.canvas && this.selectedId) {
+            this.selectDrawing(null);
+          }
         }
       });
     }
@@ -540,6 +657,17 @@ export class DrawingManager {
     this.canvas.addEventListener("pointerdown", (e) => {
       const pt = this.eventToPoint(e);
       if (!pt) return;
+
+      if (this.activeMeasure) {
+        this.activeMeasure = null;
+        this.render();
+      }
+
+      if (e.shiftKey && this.activeTool === "cursor") {
+        this.setTool("measure");
+        this.pendingPoint = pt;
+        return;
+      }
 
       if (this.activeTool === "cursor") {
         const rect = this.canvas.getBoundingClientRect();
@@ -563,6 +691,7 @@ export class DrawingManager {
 
         // Check if clicked on a selected drawing's control handle
         if (handleHit) {
+          e.stopPropagation?.();
           this.pushUndo();
           this.draggingHandle = handleHit;
           try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
@@ -571,6 +700,7 @@ export class DrawingManager {
 
         // Check hit testing on drawings
         if (hit) {
+          e.stopPropagation?.();
           this.pushUndo();
           this.selectDrawing(hit.id);
           this.draggingDrawing = { drawingId: hit.id, startX: px, startY: py, startPt: pt };
@@ -634,6 +764,14 @@ export class DrawingManager {
       } else {
         const p1 = this.pendingPoint;
         const p2 = pt;
+        if (this.activeTool === "measure") {
+          this.activeMeasure = { id: `m_${Date.now()}`, type: "measure", p1, p2 };
+          this.pendingPoint = null;
+          this.previewPoint = null;
+          this.setTool("cursor");
+          this.render();
+          return;
+        }
         const d = this.createPreviewDrawing(p1, p2);
         if (d) {
           d.id = `d_${Date.now()}`;
@@ -810,7 +948,7 @@ export class DrawingManager {
   }
 
   private isNearDrawing(d: Drawing, px: number, py: number): boolean {
-    const tol = 8;
+    const tol = 10;
     switch (d.type) {
       case "horizontal": {
         const y = this.conv.priceToY(d.price);
@@ -820,8 +958,31 @@ export class DrawingManager {
         const x = this.conv.timeToX(d.time);
         return x !== null && Math.abs(px - x) <= tol;
       }
-      case "trendline":
-      case "ray":
+      case "trendline": {
+        const x1 = this.conv.timeToX(d.p1.time);
+        const y1 = this.conv.priceToY(d.p1.price);
+        const x2 = this.conv.timeToX(d.p2.time);
+        const y2 = this.conv.priceToY(d.p2.price);
+        if (x1 === null || y1 === null || x2 === null || y2 === null) return false;
+        if (d.extendLeft && (d.extendRight || d.ray)) {
+          return this.distToLine(px, py, x1, y1, x2, y2) <= tol;
+        }
+        if (d.extendRight || d.ray) {
+          return this.distToRay(px, py, x1, y1, x2, y2) <= tol;
+        }
+        if (d.extendLeft) {
+          return this.distToRay(px, py, x2, y2, x1, y1) <= tol;
+        }
+        return this.distToSegment(px, py, x1, y1, x2, y2) <= tol;
+      }
+      case "ray": {
+        const x1 = this.conv.timeToX(d.p1.time);
+        const y1 = this.conv.priceToY(d.p1.price);
+        const x2 = this.conv.timeToX(d.p2.time);
+        const y2 = this.conv.priceToY(d.p2.price);
+        if (x1 === null || y1 === null || x2 === null || y2 === null) return false;
+        return this.distToRay(px, py, x1, y1, x2, y2) <= tol;
+      }
       case "arrow":
       case "measure": {
         const x1 = this.conv.timeToX(d.p1.time);
@@ -867,11 +1028,28 @@ export class DrawingManager {
         const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
         return px >= minX - tol && px <= maxX + tol && py >= minY - tol && py <= maxY + tol;
       }
+      case "position": {
+        const x1 = this.conv.timeToX(d.entry.time);
+        const x2 = this.conv.timeToX(d.endTime);
+        const yEntry = this.conv.priceToY(d.entry.price);
+        const yTarget = this.conv.priceToY(d.targetPrice);
+        const yStop = this.conv.priceToY(d.stopPrice);
+        if (x1 === null || x2 === null || yEntry === null || yTarget === null || yStop === null) return false;
+        const left = Math.min(x1, x2);
+        const right = Math.max(x1, x2);
+        const width = Math.max(20, right - left);
+        const minY = Math.min(yEntry, yTarget, yStop);
+        const maxY = Math.max(yEntry, yTarget, yStop);
+        return px >= left - tol && px <= left + width + tol && py >= minY - tol && py <= maxY + tol;
+      }
       case "text": {
         const x = this.conv.timeToX(d.p1.time);
         const y = this.conv.priceToY(d.p1.price);
         if (x === null || y === null) return false;
-        return Math.hypot(px - x, py - y) <= 20;
+        const fontSize = d.fontSize ?? 12;
+        const h = fontSize + 12;
+        const approxW = Math.max(30, (d.text.length * 8) + 16);
+        return px >= x - tol && px <= x + approxW + tol && py >= y - h / 2 - tol && py <= y + h / 2 + tol;
       }
       default:
         return false;
@@ -890,6 +1068,29 @@ export class DrawingManager {
     return Math.hypot(px - projX, py - projY);
   }
 
+  private distToRay(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, t);
+    const projX = x1 + t * dx;
+    const projY = y1 + t * dy;
+    return Math.hypot(px - projX, py - projY);
+  }
+
+  private distToLine(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+    const t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    const projX = x1 + t * dx;
+    const projY = y1 + t * dy;
+    return Math.hypot(px - projX, py - projY);
+  }
+
   private pushUndo(): void {
     this.undoStack.push(JSON.parse(JSON.stringify(this.drawings)));
     if (this.undoStack.length > 50) this.undoStack.shift();
@@ -900,11 +1101,16 @@ export class DrawingManager {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    if (this.conv.snapPoint) {
+    const isMagnetActive = this.magnetEnabled !== !!e.ctrlKey;
+    if (isMagnetActive && this.conv.snapPoint) {
       const snapped = this.conv.snapPoint(x, y);
-      if (snapped) return snapped;
+      if (snapped) {
+        this.lastSnappedPoint = snapped;
+        return snapped;
+      }
     }
 
+    this.lastSnappedPoint = null;
     const time = this.conv.xToTime(x);
     const price = this.conv.yToPrice(y);
     if (time === null || price === null) return null;

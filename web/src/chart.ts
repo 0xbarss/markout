@@ -13,7 +13,7 @@ import type { Bar, Signal, Trade } from "./types";
 import { DrawingFloatingToolbar } from "./ui/drawing_toolbar.ts";
 
 
-const UP = "#0ecb81", DOWN = "#f6465d";
+import { getThemeTokens, hexToRgba } from "./theme.ts";
 
 export interface Ohlc { open: number; high: number; low: number; close: number; }
 
@@ -39,18 +39,19 @@ export interface TerminalChart {
   onAutoScaleChange(cb: (auto: boolean) => void): () => void;
 }
 
-
-
 export function createTerminalChart(container: HTMLElement): TerminalChart {
+  const tokens = getThemeTokens();
+  const UP = tokens.up;
+  const DOWN = tokens.down;
+
   const chart = createChart(container, {
     autoSize: true,
-    layout: { background: { type: ColorType.Solid, color: "#0b0e11" }, textColor: "#848e9c" },
-    grid: { vertLines: { color: "#1e222d" }, horzLines: { color: "#1e222d" } },
+    layout: { background: { type: ColorType.Solid, color: tokens.bg }, textColor: tokens.muted },
+    grid: { vertLines: { color: tokens.border }, horzLines: { color: tokens.border } },
     crosshair: { mode: CrosshairMode.Normal },
-    rightPriceScale: { borderColor: "#262932", autoScale: false },
-    timeScale: { borderColor: "#262932", timeVisible: true, secondsVisible: false },
+    rightPriceScale: { borderColor: tokens.border2, autoScale: false },
+    timeScale: { borderColor: tokens.border2, timeVisible: true, secondsVisible: false },
   });
-
 
   const candles = chart.addCandlestickSeries({
     upColor: UP, downColor: DOWN, borderVisible: false, wickUpColor: UP, wickDownColor: DOWN,
@@ -134,12 +135,34 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       if (wickY === null || Math.abs(wickY - y) > 24) return null;
       return { time: b.time, price: bestPrice };
     },
+    getBarCount: (t1, t2) => {
+      if (currentBars.length === 0) return null;
+      const minT = Math.min(t1, t2);
+      const maxT = Math.max(t1, t2);
+      const i1 = barIndexAt(currentBars, minT);
+      const i2 = barIndexAt(currentBars, maxT);
+      if (i1 < 0 || i2 < 0) return null;
+      return Math.abs(i2 - i1) + 1;
+    },
+    getRangeVolume: (t1, t2) => {
+      if (currentBars.length === 0) return null;
+      const minT = Math.min(t1, t2);
+      const maxT = Math.max(t1, t2);
+      const i1 = Math.max(0, barIndexAt(currentBars, minT));
+      const i2 = Math.min(currentBars.length - 1, barIndexAt(currentBars, maxT));
+      if (i1 < 0 || i2 < 0) return null;
+      let sum = 0;
+      for (let i = Math.min(i1, i2); i <= Math.max(i1, i2); i++) {
+        sum += currentBars[i].volume ?? 0;
+      }
+      return sum;
+    },
   };
 
   const drawings = new DrawingManager(drawingCanvas, conv);
   const floatingToolbar = new DrawingFloatingToolbar(container, drawings);
 
-  // Auto scale (fits data to screen) under price column
+  // Auto scale (fits data to screen) under price column - default to closed
   const axisCorner = document.createElement("div");
   axisCorner.className = "chart-axis-corner";
   const autoBtn = document.createElement("button");
@@ -150,7 +173,8 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
   axisCorner.appendChild(autoBtn);
   container.appendChild(axisCorner);
 
-  let autoScale = false; // default to non-Auto
+  let autoScale = false; // default to closed
+  let isInitializing = true;
   let hasInitializedScale = false;
   const autoScaleListeners = new Set<(auto: boolean) => void>();
 
@@ -180,16 +204,17 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
     }
   });
 
-
   chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
     drawings.render();
     floatingToolbar.updatePosition();
-    const opts = chart.priceScale("right").options();
-    if (opts.autoScale !== undefined && opts.autoScale !== autoScale) {
-      autoScale = opts.autoScale;
-      updateAutoBtn();
-      for (const cb of autoScaleListeners) {
-        cb(autoScale);
+    if (!isInitializing) {
+      const opts = chart.priceScale("right").options();
+      if (opts.autoScale !== undefined && opts.autoScale !== autoScale) {
+        autoScale = opts.autoScale;
+        updateAutoBtn();
+        for (const cb of autoScaleListeners) {
+          cb(autoScale);
+        }
       }
     }
   });
@@ -227,20 +252,16 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       })));
       volume.setData(bars.map((b) => ({
         time: b.time as UTCTimestamp, value: b.volume,
-        color: b.close >= b.open ? "rgba(14,203,129,0.4)" : "rgba(246,70,93,0.4)",
+        color: b.close >= b.open ? hexToRgba(UP, 0.4) : hexToRgba(DOWN, 0.4),
       })));
 
       if (!hasInitializedScale && bars.length > 0) {
-        chart.priceScale("right").applyOptions({ autoScale: true });
         if (fit) chart.timeScale().fitContent();
-        if (!autoScale) {
-          requestAnimationFrame(() => {
-            if (!autoScale) {
-              chart.priceScale("right").applyOptions({ autoScale: false });
-            }
-          });
-        }
+        chart.priceScale("right").applyOptions({ autoScale: false });
         hasInitializedScale = true;
+        isInitializing = false;
+        autoScale = false;
+        updateAutoBtn();
       } else {
         if (fit) chart.timeScale().fitContent();
       }
@@ -338,7 +359,7 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
           const xi = locate(currentBars, exitTime);
           if (ei >= 0 && xi >= 0) {
             tradeConnector.applyOptions({
-              color: ft.pnl >= 0 ? "rgba(14, 203, 129, 0.7)" : "rgba(246, 70, 93, 0.7)",
+              color: ft.pnl >= 0 ? hexToRgba(UP, 0.7) : hexToRgba(DOWN, 0.7),
             });
             tradeConnector.setData([
               { time: currentBars[ei].time as UTCTimestamp, value: ft.entry_price },

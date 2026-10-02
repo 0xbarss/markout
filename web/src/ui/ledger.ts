@@ -1,28 +1,93 @@
 import { $, h } from "../dom";
-import { fmtDuration, fmtPrice, fmtSigned, signClass } from "../format";
+import { fmt, fmtDuration, fmtPrice, fmtSigned, signClass } from "../format";
 import type { Signal, Trade } from "../types";
 
-const TRADE_COLUMNS = ["ID", "Symbol", "Side", "Entry", "Exit", "Size", "PnL ($)", "R", "Duration", "Exit Reason"];
-const SIGNAL_COLUMNS = ["ID", "Time", "Strategy", "Symbol", "Side", "Entry Price", "Stop Loss", "Take Profit", "R:R", "Comment"];
+export interface ColumnDef {
+  label: string;
+  align: "left" | "right" | "center";
+}
+
+const TRADE_COLUMNS: ColumnDef[] = [
+  { label: "ID", align: "left" },
+  { label: "Symbol", align: "left" },
+  { label: "Side", align: "left" },
+  { label: "Entry", align: "right" },
+  { label: "Exit", align: "right" },
+  { label: "Size", align: "right" },
+  { label: "PnL ($)", align: "right" },
+  { label: "R", align: "right" },
+  { label: "MAE", align: "right" },
+  { label: "MFE", align: "right" },
+  { label: "Duration", align: "right" },
+  { label: "Exit Reason", align: "center" },
+];
+
+const SIGNAL_COLUMNS: ColumnDef[] = [
+  { label: "ID", align: "left" },
+  { label: "Time", align: "left" },
+  { label: "Strategy", align: "left" },
+  { label: "Symbol", align: "left" },
+  { label: "Side", align: "left" },
+  { label: "Entry Price", align: "right" },
+  { label: "Stop Loss", align: "right" },
+  { label: "Take Profit", align: "right" },
+  { label: "R:R", align: "right" },
+  { label: "Comment", align: "left" },
+];
+
 type Tab = "positions" | "closed" | "signals";
 
 const reasonLabel = (r: Trade["exit_reason"]) => (r ? r.replace(/_/g, " ") : "—");
 
 function row(t: Trade): HTMLTableRowElement {
   const tr = h("tr");
-  const side = h("td", t.direction === "buy" ? "up" : "down", t.direction === "buy" ? "Long" : "Short");
   const closed = t.exit_time !== null;
-  const cells: (HTMLElement | string)[] = [
-    `#${t.id}`, t.symbol, side,
-    fmtPrice(t.entry_price),
-    t.exit_price !== null ? fmtPrice(t.exit_price) : "—",
-    String(t.size),
-    h("td", signClass(t.pnl), closed ? fmtSigned(t.pnl, 2, "$") : "—"),
-    h("td", signClass(t.r_multiple), closed ? `${fmtSigned(t.r_multiple, 2)} R` : "—"),
-    closed ? fmtDuration((t.exit_time as number) - t.entry_time) : "open",
-    reasonLabel(t.exit_reason),
-  ];
-  for (const c of cells) tr.append(typeof c === "string" ? h("td", "", c) : c);
+
+  // ID
+  const idCell = h("td", "col-left", `#${t.id}`);
+  // Symbol
+  const symCell = h("td", "col-left", t.symbol);
+  // Side
+  const side = h("td", `col-left ${t.direction === "buy" ? "up" : "down"}`, t.direction === "buy" ? "Long" : "Short");
+  // Entry
+  const entryCell = h("td", "col-right", fmtPrice(t.entry_price));
+  // Exit
+  const exitCell = h("td", "col-right", t.exit_price !== null ? fmtPrice(t.exit_price) : "—");
+  // Size
+  const sizeCell = h("td", "col-right", String(t.size));
+  // PnL
+  const pnlCell = h("td", `col-right ${signClass(t.pnl)}`, closed ? fmtSigned(t.pnl, 2, "$") : "—");
+
+  // R with micro bar
+  const rCell = h("td", "col-right");
+  if (closed) {
+    const wrap = h("div", "r-cell");
+    const bar = h("span", "r-micro-bar");
+    const fill = h("span", `r-micro-fill ${signClass(t.r_multiple)}`);
+    const w = Math.min(100, Math.max(12, Math.round(Math.abs(t.r_multiple) * 35)));
+    fill.style.width = `${w}%`;
+    bar.append(fill);
+    wrap.append(bar, document.createTextNode(`${fmtSigned(t.r_multiple, 2)} R`));
+    rCell.append(wrap);
+  } else {
+    rCell.textContent = "—";
+  }
+
+  // MAE
+  const maeVal = t.mae_pct !== null && !isNaN(t.mae_pct) ? `${fmtSigned(t.mae_pct, 2)}%` : "—";
+  const maeCell = h("td", `col-right ${t.mae_pct !== null && t.mae_pct !== 0 ? "down" : ""}`, maeVal);
+
+  // MFE
+  const mfeVal = t.mfe_pct !== null && !isNaN(t.mfe_pct) ? `+${fmt(t.mfe_pct, 2)}%` : "—";
+  const mfeCell = h("td", `col-right ${t.mfe_pct !== null && t.mfe_pct > 0 ? "up" : ""}`, mfeVal);
+
+  // Duration
+  const durCell = h("td", "col-right", closed ? fmtDuration((t.exit_time as number) - t.entry_time) : "open");
+
+  // Exit Reason
+  const reasonCell = h("td", "col-center", reasonLabel(t.exit_reason));
+
+  tr.append(idCell, symCell, side, entryCell, exitCell, sizeCell, pnlCell, rCell, maeCell, mfeCell, durCell, reasonCell);
   return tr;
 }
 
@@ -30,7 +95,7 @@ function signalRow(s: Signal): HTMLTableRowElement {
   const tr = h("tr");
   const isBuy = s.direction === "buy";
   const isSell = s.direction === "sell";
-  const side = h("td", isBuy ? "up" : isSell ? "down" : "muted", isBuy ? "Buy" : isSell ? "Sell" : "Hold");
+  const side = h("td", `col-left ${isBuy ? "up" : isSell ? "down" : "muted"}`, isBuy ? "Buy" : isSell ? "Sell" : "Hold");
 
   let rr = "—";
   if (s.entry_price > 0 && s.stop_loss > 0 && s.take_profit > 0) {
@@ -40,19 +105,19 @@ function signalRow(s: Signal): HTMLTableRowElement {
   }
 
   const timeStr = new Date(s.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const cells: (HTMLElement | string)[] = [
-    s.id,
-    timeStr,
-    s.strategy ?? "—",
-    s.symbol ?? "—",
+
+  tr.append(
+    h("td", "col-left", s.id),
+    h("td", "col-left", timeStr),
+    h("td", "col-left", s.strategy ?? "—"),
+    h("td", "col-left", s.symbol ?? "—"),
     side,
-    fmtPrice(s.entry_price),
-    s.stop_loss > 0 ? fmtPrice(s.stop_loss) : "—",
-    s.take_profit > 0 ? fmtPrice(s.take_profit) : "—",
-    rr,
-    s.comment ?? "—",
-  ];
-  for (const c of cells) tr.append(typeof c === "string" ? h("td", "", c) : c);
+    h("td", "col-right", fmtPrice(s.entry_price)),
+    h("td", "col-right", s.stop_loss > 0 ? fmtPrice(s.stop_loss) : "—"),
+    h("td", "col-right", s.take_profit > 0 ? fmtPrice(s.take_profit) : "—"),
+    h("td", "col-right", rr),
+    h("td", "col-left", s.comment ?? "—"),
+  );
   return tr;
 }
 
@@ -93,7 +158,9 @@ export function mountLedger(
 
     const head = h("thead"), hr = h("tr");
     const cols = active === "signals" ? SIGNAL_COLUMNS : TRADE_COLUMNS;
-    for (const c of cols) hr.append(h("th", "", c));
+    for (const col of cols) {
+      hr.append(h("th", `col-${col.align}`, col.label));
+    }
     head.append(hr);
 
     const body = h("tbody");
@@ -161,4 +228,3 @@ export function mountLedger(
     },
   };
 }
-

@@ -1,5 +1,6 @@
 import { h } from "../dom.ts";
 import type { DrawingManager } from "../drawings/manager.ts";
+import { formatRgba, parseColor } from "../drawings/style_utils.ts";
 import type { Drawing, FibonacciDrawing, LineStyleType } from "../drawings/types.ts";
 import { openDrawingSettingsDialog, PRESET_COLORS } from "./drawing_dialog.ts";
 
@@ -169,7 +170,7 @@ export class DrawingFloatingToolbar {
       });
       this.el.append(extLeftBtn);
 
-      const isExtRight = d.extendRight !== false;
+      const isExtRight = !!d.extendRight;
       const extRightBtn = h("button", `floating-btn ${isExtRight ? "active" : ""}`, "⇥") as HTMLButtonElement;
       extRightBtn.type = "button";
       extRightBtn.title = isExtRight ? "Disable Extend Right" : "Extend Right";
@@ -238,26 +239,99 @@ export class DrawingFloatingToolbar {
     }
     this.closeAllPopups();
 
-    const popup = h("div", "floating-popup color-popup");
+    if (!this.currentDrawing) return;
+    const curDrawing = this.currentDrawing;
+    const activeColor = (curDrawing as any).color ?? ((curDrawing as any).targetColor ?? "#f7a600");
+    const parsed = parseColor(activeColor);
+    let curHex = parsed.hex;
+    let curAlpha = parsed.alpha;
+
+    const popup = h("div", "floating-popup color-popup-container");
     popup.style.left = `${btn.offsetLeft}px`;
+
+    const grid = h("div", "color-popup-grid");
+    const nativeInput = h("input", "color-native-input") as HTMLInputElement;
+    nativeInput.type = "color";
+    const opacityHeader = h("div", "floating-opacity-header");
+    const alphaValText = h("span", "floating-opacity-val", `${Math.round(curAlpha * 100)}%`);
+    opacityHeader.append(
+      h("span", "floating-opacity-lbl", "Opacity"),
+      alphaValText
+    );
+
+    const alphaSlider = h("input", "floating-opacity-slider") as HTMLInputElement;
+    alphaSlider.type = "range";
+    alphaSlider.min = "0";
+    alphaSlider.max = "100";
+    alphaSlider.value = String(Math.round(curAlpha * 100));
+
+    const apply = () => {
+      if (!this.currentDrawing) return;
+      const d = JSON.parse(JSON.stringify(this.currentDrawing)) as Drawing;
+      const formatted = formatRgba(curHex, curAlpha);
+      (d as any).color = formatted;
+      if (d.type === "position") {
+        d.color = formatted;
+      } else if (d.type === "box_zone") {
+        d.color = formatted;
+      }
+      this.manager.updateDrawing(d, true);
+      this.currentDrawing = d;
+
+      const swatch = this.el.querySelector(".floating-color-indicator") as HTMLElement | null;
+      if (swatch) {
+        swatch.style.backgroundColor = formatted;
+      }
+      alphaValText.textContent = `${Math.round(curAlpha * 100)}%`;
+      alphaSlider.value = String(Math.round(curAlpha * 100));
+    };
+
+    nativeInput.addEventListener("input", () => {
+      curHex = nativeInput.value;
+      apply();
+    });
+
     for (const c of PRESET_COLORS) {
       const sw = h("button", "color-preset-btn") as HTMLButtonElement;
       sw.type = "button";
       sw.style.backgroundColor = c;
+      sw.title = c;
       sw.addEventListener("click", () => {
-        if (!this.currentDrawing) return;
-        const d = JSON.parse(JSON.stringify(this.currentDrawing)) as Drawing;
-        (d as any).color = c;
-        if (d.type === "position") {
-          d.color = c;
-        } else if (d.type === "box_zone") {
-          d.color = c;
-        }
-        this.manager.updateDrawing(d, true);
-        this.render();
+        curHex = c;
+        apply();
       });
-      popup.append(sw);
+      grid.append(sw);
     }
+
+    const customBtn = h("button", "color-preset-btn color-custom-trigger", "🎨") as HTMLButtonElement;
+    customBtn.type = "button";
+    customBtn.title = "Custom color";
+    customBtn.addEventListener("click", () => nativeInput.click());
+    grid.append(customBtn, nativeInput);
+
+    popup.append(grid);
+
+    // Opacity section
+    const sep = h("div", "floating-sep-h");
+    popup.append(sep);
+
+    alphaSlider.addEventListener("input", () => {
+      curAlpha = parseInt(alphaSlider.value, 10) / 100;
+      apply();
+    });
+
+    const chipsRow = h("div", "floating-opacity-chips");
+    for (const pct of [15, 30, 60, 100]) {
+      const chip = h("button", "floating-opacity-chip", `${pct}%`) as HTMLButtonElement;
+      chip.type = "button";
+      chip.addEventListener("click", () => {
+        curAlpha = pct / 100;
+        apply();
+      });
+      chipsRow.append(chip);
+    }
+
+    popup.append(opacityHeader, alphaSlider, chipsRow);
 
     this.el.append(popup);
     this.colorPopup = popup;
