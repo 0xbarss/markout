@@ -9,6 +9,7 @@
 <body>
   <div id="app">
     <header class="topbar">
+      <button id="mobile-tools-btn" class="mobile-tools-btn" title="Drawing tools" aria-label="Toggle drawing tools">✎</button>
       <div class="brand">markout</div>
       <div id="symbol" class="symbol">—</div>
       <div id="tf-pills" class="pills"></div>
@@ -17,6 +18,7 @@
       <div class="stat"><span class="lbl">Equity</span><span id="equity">—</span></div>
       <div class="stat"><span class="lbl">PnL</span><span id="pnl">—</span></div>
     </header>
+
 
     <aside class="tools" aria-label="Drawing tools">
       <button id="tool-cursor" class="active" title="Crosshair / Select">✛</button>
@@ -50,11 +52,14 @@
     </aside>
 
     <section class="ledger">
+      <div class="sheet-handle" id="sheet-handle" role="button" aria-label="Toggle trade sheet"><span class="handle-bar"></span></div>
       <div class="tabs" id="tabs"></div>
       <div class="table-wrap"><table id="ledger"></table></div>
     </section>
   </div>
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
   <div id="error" class="error" hidden></div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

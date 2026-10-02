@@ -88,10 +88,15 @@ async fn get_stats(State(state): State<AppState>) -> Json<Stats> {
 
 async fn ws_stream(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     let rx = state.bus.subscribe();
-    ws.on_upgrade(move |socket| client_loop(socket, rx))
+    let bus = state.bus.clone();
+    ws.on_upgrade(move |socket| client_loop(socket, rx, bus))
 }
 
-async fn client_loop(mut socket: WebSocket, mut rx: broadcast::Receiver<MarketEvent>) {
+async fn client_loop(
+    mut socket: WebSocket,
+    mut rx: broadcast::Receiver<MarketEvent>,
+    bus: EventBus,
+) {
     loop {
         tokio::select! {
             ev = rx.recv() => match ev {
@@ -105,6 +110,11 @@ async fn client_loop(mut socket: WebSocket, mut rx: broadcast::Receiver<MarketEv
                 Err(RecvError::Closed) => break,
             },
             msg = socket.recv() => match msg {
+                Some(Ok(Message::Text(text))) => {
+                    if let Ok(ev) = serde_json::from_str::<MarketEvent>(&text) {
+                        bus.publish(ev);
+                    }
+                }
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                 _ => {}
             },
@@ -199,5 +209,21 @@ mod tests {
     #[tokio::test]
     async fn unknown_api_path_is_404() {
         assert_eq!(status("/api/v1/nope").await, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn ws_stream_endpoint_is_present() {
+        let res = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/ws/stream")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            res.status() == StatusCode::BAD_REQUEST || res.status() == StatusCode::UPGRADE_REQUIRED
+        );
     }
 }

@@ -1,17 +1,26 @@
 import "./styles.css";
-import { loadAll } from "./api";
-import { createTerminalChart, type Ohlc } from "./chart";
-import { $, h } from "./dom";
-import { fmtPrice, fmtSigned, signClass } from "./format";
-import { spanOf } from "./overlays/sl_tp_trail";
-import { baseInterval, resample, TIMEFRAMES } from "./resample";
+import { connectEventStream, loadAll } from "./api.ts";
+import { createTerminalChart, type Ohlc } from "./chart.ts";
+import { $, h } from "./dom.ts";
+import { fmtPrice, fmtSigned, signClass } from "./format.ts";
+import { spanOf } from "./overlays/sl_tp_trail.ts";
+import { baseInterval, resample, TIMEFRAMES } from "./resample.ts";
 import { ReplayController } from "./replay/controller.ts";
+import { computeStats } from "./stats.ts";
+import { initMobileDrawer } from "./ui/mobile.ts";
 import { mountReplayBar } from "./ui/replay_bar.ts";
 import { mountDrawingTools } from "./ui/tools.ts";
-import { renderHeaderStats, renderSymbol, renderTicker, renderTimeframes } from "./ui/header.ts";
+import {
+  renderAccount,
+  renderHeaderStats,
+  renderSymbol,
+  renderTick,
+  renderTicker,
+  renderTimeframes,
+} from "./ui/header.ts";
 import { mountLedger } from "./ui/ledger.ts";
 import { renderStats } from "./ui/panel.ts";
-import type { Bar, Trade } from "./types.ts";
+import type { Bar, MarketEvent, Trade } from "./types.ts";
 
 function renderLegend(o: Ohlc | null, fallback: Bar | undefined): void {
   const src = o ?? fallback;
@@ -36,20 +45,25 @@ function dominantSymbol(trades: Trade[]): string {
 }
 
 async function main(): Promise<void> {
-  const [bars, trades, stats] = await loadAll();
+  const [initialBars, initialTrades, initialStats] = await loadAll();
   const chart = createTerminalChart($("chart"));
   const replay = new ReplayController();
   mountReplayBar(replay);
   mountDrawingTools(chart.drawings);
+  initMobileDrawer();
 
-  const symbol = dominantSymbol(trades);
-  const overlayTrades = trades.filter((t) => t.symbol === symbol);
+  let bars = initialBars;
+  let trades = initialTrades;
+  let stats = initialStats;
+  let symbol = dominantSymbol(trades);
+  let overlayTrades = trades.filter((t) => t.symbol === symbol);
   let view: Bar[] = bars;
 
   renderSymbol(symbol);
   renderHeaderStats(stats);
   renderStats(stats);
-  mountLedger(trades, (t) => {
+
+  const ledger = mountLedger(trades, (t) => {
     const span = t.symbol === symbol ? spanOf(t, view) : null;
     if (!span) return;
     const pad = Math.max(20, Math.round((span[1] - span[0]) * 0.5));
@@ -64,8 +78,7 @@ async function main(): Promise<void> {
     renderLegend(null, frame.visibleBars[frame.visibleBars.length - 1]);
   });
 
-  const base = baseInterval(bars);
-  // Start on the native timeframe: the first pill at or above the data's interval.
+  let base = baseInterval(bars);
   let active = TIMEFRAMES.find((t) => t.sec >= base)?.sec ?? 0;
   const apply = () => {
     view = active === base || base === 0 ? bars : resample(bars, active);
@@ -79,8 +92,103 @@ async function main(): Promise<void> {
     const visible = replay.getVisibleBars();
     renderLegend(o, visible[visible.length - 1]);
   });
+
   $("empty").hidden = bars.length > 0;
   apply();
+
+  connectEventStream((event: MarketEvent) => {
+    switch (event.type) {
+      case "bar": {
+        const b = event.data;
+        if (bars.length === 0) {
+          bars.push(b);
+          $("empty").hidden = true;
+          base = baseInterval(bars);
+          active = TIMEFRAMES.find((t) => t.sec >= base)?.sec ?? 0;
+          apply();
+          return;
+        }
+
+        const last = bars[bars.length - 1];
+        if (b.time === last.time) {
+          bars[bars.length - 1] = b;
+        } else if (b.time > last.time) {
+          bars.push(b);
+        }
+
+        if (active === base || base === 0) {
+          replay.appendOrUpdateBar(b);
+        } else {
+          const bucketTime = Math.floor(b.time / active) * active;
+          const bucketBars = bars.filter(
+            (item) => item.time >= bucketTime && item.time < bucketTime + active,
+          );
+          if (bucketBars.length > 0) {
+            const bucketBar: Bar = {
+              time: bucketTime,
+              open: bucketBars[0].open,
+              high: Math.max(...bucketBars.map((x) => x.high)),
+              low: Math.min(...bucketBars.map((x) => x.low)),
+              close: bucketBars[bucketBars.length - 1].close,
+              volume: bucketBars.reduce((acc, x) => acc + x.volume, 0),
+            };
+            replay.appendOrUpdateBar(bucketBar);
+          }
+        }
+        break;
+      }
+      case "tick": {
+        const visible = replay.getVisibleBars();
+        const last = visible[visible.length - 1];
+        renderTick(event.data, last?.close);
+        break;
+      }
+      case "trade": {
+        const t = event.data.trade;
+        const idx = trades.findIndex((x) => x.id === t.id);
+        if (idx >= 0) {
+          trades[idx] = t;
+        } else {
+          trades.push(t);
+        }
+        if (symbol === "—" && t.symbol) {
+          symbol = t.symbol;
+          renderSymbol(symbol);
+          chart.drawings.setContext(symbol, active);
+        }
+        overlayTrades = trades.filter((x) => x.symbol === symbol);
+        ledger.update(trades);
+        stats = computeStats(trades);
+        renderStats(stats);
+        renderHeaderStats(stats);
+        if (t.symbol === symbol) {
+          replay.updateTrade(t);
+        }
+        break;
+      }
+      case "risk_bracket": {
+        const { trade_id, stop_loss, take_profit, timestamp } = event.data;
+        const tr = trades.find((x) => x.id === trade_id);
+        if (tr) {
+          if (take_profit !== null) tr.take_profit = take_profit;
+          if (stop_loss !== null) {
+            const lastPt = tr.sl_history[tr.sl_history.length - 1];
+            if (lastPt && lastPt.time === timestamp) {
+              lastPt.price = stop_loss;
+            } else {
+              tr.sl_history.push({ time: timestamp, price: stop_loss });
+            }
+          }
+        }
+        replay.updateRiskBracket(trade_id, stop_loss, take_profit, timestamp);
+        break;
+      }
+      case "account": {
+        renderAccount(event.data);
+        break;
+      }
+    }
+  });
 }
 
 main().catch((err: unknown) => {

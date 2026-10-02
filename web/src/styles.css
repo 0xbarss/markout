@@ -74,11 +74,48 @@ td.none { text-align: center; color: var(--muted); font-family: system-ui, sans-
 .error { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
   background: var(--panel); color: var(--down); border: 1px solid var(--down); border-radius: 6px; padding: 8px 14px; }
 
+.mobile-tools-btn { display: none; padding: 4px 8px; font-size: 15px; color: var(--accent); }
+.drawer-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 20; }
+.sheet-handle { display: none; height: 16px; width: 100%; cursor: pointer; align-items: center; justify-content: center; }
+.handle-bar { width: 36px; height: 4px; background: var(--border2); border-radius: 2px; }
+
 @media (max-width: 800px) {
-  html, body { height: auto; }
-  #app { height: auto; grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 44px 420px auto 320px;
-    grid-template-areas: "top" "chart" "panel" "ledger"; }
-  .tools { display: none; }
-  .panel { border-left: 0; border-top: 1px solid var(--border); }
+  html, body { height: 100%; overflow: hidden; }
+  #app {
+    height: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 44px minmax(0, 1fr) auto;
+    grid-template-areas: "top" "chart" "ledger";
+  }
+  .mobile-tools-btn { display: inline-flex; align-items: center; justify-content: center; }
+  .tools {
+    display: flex;
+    position: fixed;
+    top: 44px;
+    bottom: 0;
+    left: 0;
+    width: 48px;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease-in-out;
+    z-index: 25;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.5);
+  }
+  .tools.open { transform: translateX(0); }
+  .panel { display: none; }
+  .sheet-handle { display: flex; }
+  .ledger {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 38px;
+    transition: height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 15;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+  }
+  .ledger.expanded { height: 50vh; }
 }
+

@@ -1,7 +1,7 @@
 import { $, h } from "../dom";
 import { fmtPrice, fmtSigned, signClass } from "../format";
 import { TIMEFRAMES } from "../resample";
-import type { Bar, Stats } from "../types";
+import type { AccountSnapshot, Bar, Stats, Tick } from "../types.ts";
 
 export function renderSymbol(symbol: string): void {
   $("symbol").textContent = symbol;
@@ -32,10 +32,23 @@ export function renderTicker(bars: Bar[]): void {
   }
 }
 
+export function renderTick(tick: Tick, prevClose?: number): void {
+  $("last-price").textContent = fmtPrice(tick.price);
+  if (prevClose && prevClose !== 0) {
+    const pct = ((tick.price - prevClose) / prevClose) * 100;
+    const chg = $("last-change");
+    chg.textContent = `${fmtSigned(pct)}%`;
+    chg.className = `chg ${signClass(pct)}`;
+  }
+}
+
 export function renderHeaderStats(stats: Stats): void {
   const pnl = $("pnl");
   pnl.textContent = fmtSigned(stats.net_pnl, 2, "$");
   pnl.className = signClass(stats.net_pnl);
-  // Equity needs account events (live mode), so it stays blank for now.
-  $("equity").textContent = "—";
 }
+
+export function renderAccount(account: AccountSnapshot): void {
+  $("equity").textContent = fmtPrice(account.equity);
+}
+

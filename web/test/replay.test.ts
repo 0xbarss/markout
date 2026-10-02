@@ -145,3 +145,89 @@ test("replay controller: play and pause state transitions", () => {
 
   controller.destroy();
 });
+
+test("replay controller: live bar updates when synced to live", () => {
+  const bars = makeBars(3);
+  const controller = new ReplayController(bars, []);
+
+  assert.equal(controller.isLive(), true);
+  assert.equal(controller.getCursor(), 2);
+
+  // Update existing current bar
+  const updatedBar: Bar = { ...bars[2], close: 150 };
+  controller.appendOrUpdateBar(updatedBar);
+  assert.equal(controller.getTotal(), 3);
+  assert.equal(controller.getCursor(), 2);
+  assert.equal(controller.getVisibleBars()[2].close, 150);
+
+  // Append new incoming bar while live: cursor advances
+  const newBar: Bar = {
+    time: T0 + 3 * STEP,
+    open: 150,
+    high: 155,
+    low: 149,
+    close: 152,
+    volume: 12,
+  };
+  controller.appendOrUpdateBar(newBar);
+  assert.equal(controller.getTotal(), 4);
+  assert.equal(controller.getCursor(), 3);
+  assert.equal(controller.isLive(), true);
+
+  controller.destroy();
+});
+
+test("replay controller: live bar updates when scrubbed back preserve cursor", () => {
+  const bars = makeBars(4);
+  const controller = new ReplayController(bars, []);
+
+  // Scrub back to index 1
+  controller.seek(1);
+  assert.equal(controller.isLive(), false);
+  assert.equal(controller.getCursor(), 1);
+
+  // New bar arrives
+  const newBar: Bar = {
+    time: T0 + 4 * STEP,
+    open: 110,
+    high: 115,
+    low: 108,
+    close: 112,
+    volume: 15,
+  };
+  controller.appendOrUpdateBar(newBar);
+  assert.equal(controller.getTotal(), 5);
+  // Cursor stays at 1
+  assert.equal(controller.getCursor(), 1);
+  assert.equal(controller.isLive(), false);
+
+  // Jump to live snaps to the new latest bar
+  controller.jumpToLive();
+  assert.equal(controller.getCursor(), 4);
+  assert.equal(controller.isLive(), true);
+
+  controller.destroy();
+});
+
+test("replay controller: trade updates and risk bracket movements", () => {
+  const bars = makeBars(6);
+  const trade = makeTrade();
+  const controller = new ReplayController(bars, [trade]);
+
+  // Update risk bracket (trailing stop moved)
+  controller.updateRiskBracket(1, 98.5, 108, T0 + 4 * STEP);
+  let visibleTrades = controller.getVisibleTrades();
+  assert.equal(visibleTrades.length, 1);
+  assert.equal(visibleTrades[0].take_profit, 108);
+  const lastPoint = visibleTrades[0].sl_history[visibleTrades[0].sl_history.length - 1];
+  assert.equal(lastPoint.price, 98.5);
+
+  // Update existing trade
+  const modifiedTrade: Trade = { ...trade, pnl: 20 };
+  controller.updateTrade(modifiedTrade);
+  visibleTrades = controller.getVisibleTrades();
+  assert.equal(visibleTrades[0].pnl, 20);
+
+  controller.destroy();
+});
+

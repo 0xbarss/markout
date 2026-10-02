@@ -25,9 +25,14 @@ function row(t: Trade): HTMLTableRowElement {
   return tr;
 }
 
-export function mountLedger(trades: Trade[], onSelect: (t: Trade) => void): void {
-  const open = trades.filter((t) => t.exit_time === null);
-  const closed = trades.filter((t) => t.exit_time !== null).sort((a, b) => (b.exit_time as number) - (a.exit_time as number));
+export interface LedgerHandle {
+  update(trades: Trade[]): void;
+}
+
+export function mountLedger(trades: Trade[], onSelect: (t: Trade) => void): LedgerHandle {
+  let currentTrades = trades;
+  let open = currentTrades.filter((t) => t.exit_time === null);
+  let closed = currentTrades.filter((t) => t.exit_time !== null).sort((a, b) => (b.exit_time as number) - (a.exit_time as number));
   const tabs = $("tabs"), table = $("ledger");
   let active: Tab = "closed";
   let selected: number | null = null;
@@ -62,4 +67,14 @@ export function mountLedger(trades: Trade[], onSelect: (t: Trade) => void): void
     table.replaceChildren(head, body);
   };
   render();
+
+  return {
+    update(nextTrades: Trade[]): void {
+      currentTrades = nextTrades;
+      open = currentTrades.filter((t) => t.exit_time === null);
+      closed = currentTrades.filter((t) => t.exit_time !== null).sort((a, b) => (b.exit_time as number) - (a.exit_time as number));
+      render();
+    },
+  };
 }
+

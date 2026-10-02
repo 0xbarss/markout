@@ -20,3 +20,39 @@ export interface Stats {
   wins: number; losses: number; win_rate: number;
   net_pnl: number; total_fees: number; avg_r: number; max_drawdown: number;
 }
+
+export interface Tick {
+  symbol: string;
+  time: number;
+  price: number;
+  bid?: number | null;
+  ask?: number | null;
+}
+
+export type TradeUpdateKind = "entry" | "partial_exit" | "exit";
+
+export interface TradeUpdate {
+  kind: TradeUpdateKind;
+  trade: Trade;
+}
+
+export interface RiskBracketEvent {
+  trade_id: number;
+  stop_loss: number | null;
+  take_profit: number | null;
+  timestamp: number;
+}
+
+export interface AccountSnapshot {
+  time: number;
+  balance: number;
+  equity: number;
+}
+
+export type MarketEvent =
+  | { type: "bar"; data: Bar }
+  | { type: "tick"; data: Tick }
+  | { type: "trade"; data: TradeUpdate }
+  | { type: "risk_bracket"; data: RiskBracketEvent }
+  | { type: "account"; data: AccountSnapshot };
+

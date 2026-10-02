@@ -45,6 +45,73 @@ export class ReplayController {
     this.emitFrame();
   }
 
+  public appendOrUpdateBar(bar: Bar): void {
+    if (this.bars.length === 0) {
+      this.bars.push(bar);
+      this.cursor = 0;
+      this.emitState();
+      this.emitFrame();
+      return;
+    }
+
+    const last = this.bars[this.bars.length - 1];
+    if (bar.time === last.time) {
+      this.bars[this.bars.length - 1] = bar;
+      this.emitFrame();
+      return;
+    }
+
+    if (bar.time > last.time) {
+      const wasLive = this.isLive() && !this.isPlaying;
+      this.bars.push(bar);
+      if (wasLive) {
+        this.cursor = this.bars.length - 1;
+      }
+      this.emitState();
+      this.emitFrame();
+    }
+  }
+
+  public updateTrades(trades: Trade[]): void {
+    this.trades = trades;
+    this.emitFrame();
+  }
+
+  public updateTrade(trade: Trade): void {
+    const idx = this.trades.findIndex((t) => t.id === trade.id);
+    if (idx >= 0) {
+      this.trades[idx] = trade;
+    } else {
+      this.trades.push(trade);
+    }
+    this.emitFrame();
+  }
+
+  public updateRiskBracket(
+    tradeId: number,
+    stopLoss: number | null,
+    takeProfit: number | null,
+    timestamp: number
+  ): void {
+    const trade = this.trades.find((t) => t.id === tradeId);
+    if (!trade) return;
+
+    if (takeProfit !== null) {
+      trade.take_profit = takeProfit;
+    }
+    if (stopLoss !== null) {
+      const history = trade.sl_history;
+      const lastPoint = history[history.length - 1];
+      if (lastPoint && lastPoint.time === timestamp) {
+        lastPoint.price = stopLoss;
+      } else {
+        history.push({ time: timestamp, price: stopLoss });
+      }
+    }
+    this.emitFrame();
+  }
+
+
   public getCursor(): number {
     return this.cursor;
   }
