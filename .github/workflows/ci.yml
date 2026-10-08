@@ -19,7 +19,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Build web assets and run frontend tests
-        run: npm ci && npm run build && npm test
+        run: npm ci && npm run build && npm run typecheck && npm test
         working-directory: web
 
       - name: Set up Rust toolchain
@@ -38,3 +38,33 @@ jobs:
 
       - name: Run Rust test suite
         run: cargo test
+
+      - name: Verify published crate contents
+        run: |
+          rm -rf web/node_modules
+          cargo package --list --allow-dirty | grep -vE '^(src/|web/dist/|examples/|build\.rs|Cargo\.|LICENSE|README|CONTRIBUTING|\.cargo_vcs_info)' && exit 1 || true
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web assets
+        run: npm ci && npm run build
+        working-directory: web
+
+      - name: Set up Rust MSRV (1.88.0)
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check on MSRV
+        run: cargo check --all-targets

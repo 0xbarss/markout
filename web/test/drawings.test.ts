@@ -59,7 +59,7 @@ const mockConverter: CoordinateConverter = {
   xToTime: (x) => 1_700_000_000 + x,
   priceToY: (p) => 1000 - p,
   yToPrice: (y) => 1000 - y,
-  snapPoint: (x, y) => null,
+  snapPoint: (_x, _y) => null,
 };
 
 test("fibonacci levels include standard golden ratios", () => {
@@ -254,7 +254,7 @@ test("drawing manager: onEdit callback triggers on openEdit", () => {
   });
 
   mgr.openEdit(d);
-  assert.equal(editedDrawing?.id, "pos_1");
+  assert.equal((editedDrawing as unknown as Drawing | null)?.id, "pos_1");
 });
 
 test("drawing manager: double-clicking a drawing triggers onEdit", () => {
@@ -416,7 +416,7 @@ test("drawing manager: magnet mode toggles and snaps only when active", () => {
   let snapCalled = false;
   const customConverter: CoordinateConverter = {
     ...mockConverter,
-    snapPoint: (x, y) => {
+    snapPoint: (_x, _y) => {
       snapCalled = true;
       return { time: 1_700_000_999, price: 999 };
     },

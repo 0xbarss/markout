@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fmt, fmtDuration, fmtPrice, fmtSigned, precisionFor, signClass } from "../src/format.ts";
+import { fmtDuration, fmtPrice, fmtSigned, precisionFor, signClass } from "../src/format.ts";
 
 test("fmtSigned: formats percentage values with consistent sign and decimals", () => {
   assert.equal(`${fmtSigned(0.8, 2)}%`, "+0.80%");

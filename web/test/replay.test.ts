@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { clipTradesForReplay, panelModel } from "../src/replay/ghost.ts";
-import { ReplayController, SUPPORTED_SPEEDS } from "../src/replay/controller.ts";
+import { ReplayController } from "../src/replay/controller.ts";
 import type { Bar, Trade } from "../src/types.ts";
 
 const T0 = 1_700_000_000;
