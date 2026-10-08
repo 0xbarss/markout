@@ -25,6 +25,18 @@ pub struct Cli {
     #[arg(long)]
     pub strategy: Option<PathBuf>,
 
+    /// Allowed Host header values (can be repeated).
+    #[arg(long = "allow-host", global = true)]
+    pub allow_host: Vec<String>,
+
+    /// Allowed WebSocket Origin values (can be repeated).
+    #[arg(long = "allow-origin", global = true)]
+    pub allow_origin: Vec<String>,
+
+    /// Allow clients to publish MarketEvent frames over WebSocket.
+    #[arg(long = "allow-ws-publish", global = true)]
+    pub allow_ws_publish: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -76,6 +88,9 @@ pub struct Config {
     pub host: String,
     pub port: u16,
     pub mode: Mode,
+    pub allow_hosts: Vec<String>,
+    pub allow_origins: Vec<String>,
+    pub allow_ws_publish: bool,
 }
 
 impl From<Cli> for Config {
@@ -96,6 +111,9 @@ impl From<Cli> for Config {
             host: cli.host,
             port: cli.port,
             mode,
+            allow_hosts: cli.allow_host,
+            allow_origins: cli.allow_origin,
+            allow_ws_publish: cli.allow_ws_publish,
         }
     }
 }
@@ -156,5 +174,21 @@ mod tests {
                 tf: Some("15m".into())
             }
         );
+    }
+
+    #[test]
+    fn security_flags_parsed() {
+        let c = parse(&[
+            "--allow-host",
+            "example.com",
+            "--allow-host",
+            "192.168.1.50",
+            "--allow-origin",
+            "https://app.example.com",
+            "--allow-ws-publish",
+        ]);
+        assert_eq!(c.allow_hosts, vec!["example.com", "192.168.1.50"]);
+        assert_eq!(c.allow_origins, vec!["https://app.example.com"]);
+        assert!(c.allow_ws_publish);
     }
 }

@@ -26,6 +26,43 @@ pub enum MarketEvent {
     Account(AccountSnapshot),
 }
 
+impl MarketEvent {
+    pub fn is_valid(&self) -> bool {
+        match self {
+            MarketEvent::Bar(b) => crate::ingestion::validate_bar(b).is_ok(),
+            MarketEvent::Tick(t) => {
+                t.time > 0
+                    && t.price.is_finite()
+                    && t.price > 0.0
+                    && t.bid.is_none_or(|p| p.is_finite() && p > 0.0)
+                    && t.ask.is_none_or(|p| p.is_finite() && p > 0.0)
+            }
+            MarketEvent::Trade(u) => crate::ingestion::validate_trade(&u.trade).is_ok(),
+            MarketEvent::Signal(s) => {
+                s.time > 0
+                    && s.entry_price.is_finite()
+                    && s.entry_price > 0.0
+                    && s.stop_loss.is_finite()
+                    && s.take_profit.is_finite()
+                    && s.is_valid()
+            }
+            MarketEvent::RiskBracket {
+                stop_loss,
+                take_profit,
+                timestamp,
+                ..
+            } => {
+                *timestamp > 0
+                    && stop_loss.is_none_or(|p| p.is_finite() && p > 0.0)
+                    && take_profit.is_none_or(|p| p.is_finite() && p > 0.0)
+            }
+            MarketEvent::Account(acc) => {
+                acc.time > 0 && acc.balance.is_finite() && acc.equity.is_finite()
+            }
+        }
+    }
+}
+
 /// Thin wrapper over a Tokio broadcast channel. Cheap to clone.
 #[derive(Debug, Clone)]
 pub struct EventBus {
@@ -102,5 +139,49 @@ mod tests {
         let json = serde_json::to_string(&ev).unwrap();
         assert!(json.contains(r#""type":"risk_bracket""#));
         assert_eq!(serde_json::from_str::<MarketEvent>(&json).unwrap(), ev);
+    }
+
+    #[test]
+    fn market_event_validation() {
+        let valid_bar = MarketEvent::Bar(bar());
+        assert!(valid_bar.is_valid());
+
+        let invalid_bar = MarketEvent::Bar(Bar {
+            time: 1_700_000_000,
+            open: 1.0,
+            high: 0.5,
+            low: 2.0,
+            close: 1.5,
+            volume: 10.0,
+        });
+        assert!(!invalid_bar.is_valid());
+
+        let invalid_volume = MarketEvent::Bar(Bar {
+            time: 1_700_000_000,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: -1.0,
+        });
+        assert!(!invalid_volume.is_valid());
+
+        let valid_tick = MarketEvent::Tick(Tick {
+            symbol: "BTCUSDT".into(),
+            time: 1_700_000_000,
+            price: 50000.0,
+            bid: Some(49999.0),
+            ask: Some(50001.0),
+        });
+        assert!(valid_tick.is_valid());
+
+        let invalid_tick = MarketEvent::Tick(Tick {
+            symbol: "BTCUSDT".into(),
+            time: 0,
+            price: -50.0,
+            bid: None,
+            ask: None,
+        });
+        assert!(!invalid_tick.is_valid());
     }
 }

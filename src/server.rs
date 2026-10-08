@@ -1,11 +1,12 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Request, State,
     },
-    http::{header, StatusCode, Uri},
+    http::{header, HeaderMap, StatusCode, Uri},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
     Json, Router,
@@ -13,7 +14,7 @@ use axum::{
 use rust_embed::RustEmbed;
 use serde_json::json;
 use tokio::sync::broadcast::{self, error::RecvError};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::trace::TraceLayer;
 
 use crate::{
     config::Config,
@@ -33,6 +34,10 @@ pub struct AppState {
     pub bus: EventBus,
     pub mode: &'static str,
     pub data: Arc<Dataset>,
+    pub host: String,
+    pub allowed_hosts: Arc<HashSet<String>>,
+    pub allowed_origins: Arc<Vec<String>>,
+    pub allow_ws_publish: bool,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -45,15 +50,66 @@ pub fn router(state: AppState) -> Router {
         .route("/ws/stream", get(ws_stream))
         .fallback(static_handler)
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_allowed_host,
+        ))
         .with_state(state)
 }
 
+async fn require_allowed_host(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let host_ok = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .map(|h| {
+            let name = if let Some(stripped) = h.strip_prefix('[') {
+                stripped.split_once(']').map(|(n, _)| n).unwrap_or(h)
+            } else {
+                h.rsplit_once(':').map(|(n, _)| n).unwrap_or(h)
+            };
+            let name = name.trim_matches(|c| c == '[' || c == ']');
+            matches!(name, "127.0.0.1" | "localhost" | "::1") || state.allowed_hosts.contains(name)
+        })
+        .unwrap_or(false);
+
+    if !host_ok {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    if req.uri().path().starts_with("/ws") && !origin_allowed(req.headers(), &state.allowed_origins)
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    next.run(req).await
+}
+
 pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result<()> {
+    let host_is_loopback = matches!(config.host.as_str(), "127.0.0.1" | "localhost" | "::1");
+    if !host_is_loopback {
+        tracing::warn!(
+            "listening on non-loopback address {}; no authentication is configured",
+            config.host
+        );
+    }
+
+    let mut allowed_hosts = HashSet::new();
+    for h in &config.allow_hosts {
+        allowed_hosts.insert(h.clone());
+    }
+    if !matches!(config.host.as_str(), "0.0.0.0" | "::") {
+        allowed_hosts.insert(config.host.clone());
+    }
+
     let state = AppState {
         bus,
         mode: config.mode.name(),
         data: Arc::new(data),
+        host: config.host.clone(),
+        allowed_hosts: Arc::new(allowed_hosts),
+        allowed_origins: Arc::new(config.allow_origins),
+        allow_ws_publish: config.allow_ws_publish,
     };
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -91,16 +147,40 @@ async fn get_stats(State(state): State<AppState>) -> Json<Stats> {
     Json(stats::compute(&state.data.trades))
 }
 
-async fn ws_stream(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+fn origin_allowed(h: &HeaderMap, extra: &[String]) -> bool {
+    let Some(origin) = h.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
+        return true;
+    };
+    if extra.iter().any(|o| o == origin) {
+        return true;
+    }
+    let host = h.get(header::HOST).and_then(|v| v.to_str().ok());
+    let origin_host = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"));
+    host.is_some() && origin_host == host
+}
+
+async fn ws_stream(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Response {
+    if !origin_allowed(&headers, &state.allowed_origins) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     let rx = state.bus.subscribe();
     let bus = state.bus.clone();
-    ws.on_upgrade(move |socket| client_loop(socket, rx, bus))
+    let publish = state.allow_ws_publish;
+    ws.max_message_size(64 * 1024)
+        .on_upgrade(move |socket| client_loop(socket, rx, bus, publish))
 }
 
 async fn client_loop(
     mut socket: WebSocket,
     mut rx: broadcast::Receiver<MarketEvent>,
     bus: EventBus,
+    publish: bool,
 ) {
     loop {
         tokio::select! {
@@ -116,14 +196,25 @@ async fn client_loop(
             },
             msg = socket.recv() => match msg {
                 Some(Ok(Message::Text(text))) => {
-                    if let Ok(ev) = serde_json::from_str::<MarketEvent>(&text) {
-                        bus.publish(ev);
-                    }
+                    handle_inbound_text(&text, &bus, publish);
                 }
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                 _ => {}
             },
         }
+    }
+}
+
+fn handle_inbound_text(text: &str, bus: &EventBus, publish: bool) {
+    if !publish {
+        return;
+    }
+    match serde_json::from_str::<MarketEvent>(text) {
+        Ok(ev) if ev.is_valid() => {
+            bus.publish(ev);
+        }
+        Ok(_) => tracing::warn!("rejected invalid inbound event"),
+        Err(e) => tracing::warn!("bad inbound frame: {e}"),
     }
 }
 
@@ -152,11 +243,26 @@ mod tests {
     use tower::ServiceExt;
 
     fn app_with(data: Dataset) -> Router {
-        router(AppState {
-            bus: EventBus::default(),
+        app_with_options(data, &[], &[], false).0
+    }
+
+    fn app_with_options(
+        data: Dataset,
+        allowed_hosts: &[&str],
+        allowed_origins: &[&str],
+        allow_ws_publish: bool,
+    ) -> (Router, EventBus) {
+        let bus = EventBus::default();
+        let state = AppState {
+            bus: bus.clone(),
             mode: "offline",
             data: Arc::new(data),
-        })
+            host: "127.0.0.1".into(),
+            allowed_hosts: Arc::new(allowed_hosts.iter().map(|s| s.to_string()).collect()),
+            allowed_origins: Arc::new(allowed_origins.iter().map(|s| s.to_string()).collect()),
+            allow_ws_publish,
+        };
+        (router(state), bus)
     }
 
     fn app() -> Router {
@@ -165,7 +271,13 @@ mod tests {
 
     async fn status(uri: &str) -> StatusCode {
         app()
-            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap()
             .status()
@@ -199,6 +311,7 @@ mod tests {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/bars")
+                .header(header::HOST, "127.0.0.1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -234,6 +347,7 @@ mod tests {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/signals")
+                .header(header::HOST, "127.0.0.1")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -258,6 +372,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/ws/stream")
+                    .header(header::HOST, "127.0.0.1")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -266,5 +381,159 @@ mod tests {
         assert!(
             res.status() == StatusCode::BAD_REQUEST || res.status() == StatusCode::UPGRADE_REQUIRED
         );
+    }
+
+    #[tokio::test]
+    async fn host_check_blocks_foreign_host() {
+        let res = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/trades")
+                    .header(header::HOST, "evil.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn host_check_allows_whitelisted_host() {
+        let (app, _) = app_with_options(Dataset::default(), &["myhost.lan"], &[], false);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/health")
+                    .header(header::HOST, "myhost.lan:8080")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn cors_headers_are_absent() {
+        let res = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/trades")
+                    .header(header::HOST, "127.0.0.1")
+                    .header(header::ORIGIN, "https://evil.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res
+            .headers()
+            .contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+    }
+
+    #[tokio::test]
+    async fn ws_foreign_origin_is_forbidden() {
+        let res = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/ws/stream")
+                    .header(header::HOST, "127.0.0.1")
+                    .header(header::ORIGIN, "https://evil.example")
+                    .header(header::CONNECTION, "Upgrade")
+                    .header(header::UPGRADE, "websocket")
+                    .header(header::SEC_WEBSOCKET_VERSION, "13")
+                    .header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn ws_same_origin_and_whitelisted_origin_pass() {
+        // Same origin: Origin matches Host
+        let res_same = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/ws/stream")
+                    .header(header::HOST, "localhost:8080")
+                    .header(header::ORIGIN, "http://localhost:8080")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(res_same.status(), StatusCode::FORBIDDEN);
+
+        // Whitelisted origin
+        let (app_whitelist, _) =
+            app_with_options(Dataset::default(), &[], &["https://allowed.example"], false);
+        let res_white = app_whitelist
+            .oneshot(
+                Request::builder()
+                    .uri("/ws/stream")
+                    .header(header::HOST, "127.0.0.1")
+                    .header(header::ORIGIN, "https://allowed.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(res_white.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn inbound_ws_publishing_validation() {
+        let bus = EventBus::new(8);
+        let mut rx = bus.subscribe();
+
+        let valid_json = serde_json::json!({
+            "type": "bar",
+            "data": {
+                "time": 1700000000,
+                "open": 10.0,
+                "high": 12.0,
+                "low": 9.0,
+                "close": 11.0,
+                "volume": 100.0
+            }
+        })
+        .to_string();
+
+        let invalid_json = serde_json::json!({
+            "type": "bar",
+            "data": {
+                "time": 1700000000,
+                "open": 10.0,
+                "high": 8.0,
+                "low": 12.0,
+                "close": 11.0,
+                "volume": 100.0
+            }
+        })
+        .to_string();
+
+        // 1. When publishing is disabled: valid event is dropped
+        handle_inbound_text(&valid_json, &bus, false);
+        assert!(rx.try_recv().is_err());
+
+        // 2. When publishing is enabled: invalid event (low > high) is dropped
+        handle_inbound_text(&invalid_json, &bus, true);
+        assert!(rx.try_recv().is_err());
+
+        // 3. When publishing is enabled: valid event is published
+        handle_inbound_text(&valid_json, &bus, true);
+        let received = rx.try_recv().expect("event should be received");
+        match received {
+            MarketEvent::Bar(b) => {
+                assert_eq!(b.time, 1700000000);
+                assert_eq!(b.close, 11.0);
+            }
+            _ => panic!("unexpected event variant"),
+        }
     }
 }

@@ -151,7 +151,7 @@ For live monitoring and bot integration:
 
 - **Broadcast Event Bus**: A Tokio broadcast channel distributes incoming `MarketEvent` messages to active WebSocket connections.
 - **Backpressure Handling**: If a client falls behind the event rate, the client loop catches `RecvError::Lagged(n)` and logs the skipped count without dropping the connection.
-- **Bi-Directional Channel**: Clients receive live ticks, bars, and risk adjustments from the server or push `MarketEvent` payloads directly to the event bus over `/ws/stream`.
+- **Bi-Directional Channel**: Clients receive live ticks, bars, and risk adjustments from the server or push `MarketEvent` payloads directly to the event bus over `/ws/stream` (requires `--allow-ws-publish`).
 
 ### Frontend Architecture & Canvas Overlays
 
@@ -394,7 +394,7 @@ async fn main() -> anyhow::Result<()> {
 
 ### 4. Streaming Events via WebSocket
 
-External processes (such as Python backtest harnesses or MT5 scripts) can push and consume real-time market data via `/ws/stream`:
+External processes (such as Python backtest harnesses or MT5 scripts) can push and consume real-time market data via `/ws/stream` (launch `markout` with `--allow-ws-publish` to accept inbound event injection):
 
 ```python
 import json
@@ -446,6 +446,9 @@ Options:
       --trades <PATH>        Trades database or log file (alias: --db)
       --bars <PATH>          Bars file or directory (CSV, Parquet, or SQLite)
       --strategy <PATH>      Strategy signals log file (JSONL or Parquet)
+      --allow-host <HOST>    Allowed Host header values (can be repeated)
+      --allow-origin <ORIGIN> Allowed WebSocket Origin values (can be repeated)
+      --allow-ws-publish     Allow clients to publish MarketEvent frames over WebSocket
   -h, --help                 Print help
   -V, --version              Print version
 ```
