@@ -128,7 +128,8 @@ mod tests {
 
     #[test]
     fn jsonl_skips_blank_lines_and_accepts_long_alias() {
-        let input = format!("{LINE}\n\n{LINE}\n").replace("\"id\":1", "\"id\":2");
+        let line2 = LINE.replace("\"id\":1", "\"id\":2");
+        let input = format!("{LINE}\n\n{line2}\n");
         let trades = parse_jsonl(input.as_bytes()).unwrap();
         assert_eq!(trades.len(), 2);
         assert_eq!(trades[0].direction, TradeSide::Buy);
