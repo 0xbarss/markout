@@ -37,7 +37,7 @@ Before submitting code, please review the conventions outlined below.
 ### Prerequisites
 
 - **Rust**: 1.88 or later with `cargo`, `rustfmt`, and `clippy`.
-- **Node.js**: 22.0 or later with `npm`.
+- **Node.js**: 22.18 or later with `npm`.
 
 ### Initial Build
 

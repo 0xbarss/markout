@@ -26,6 +26,8 @@ export interface TerminalChart {
   setTrades(trades: Trade[], bars: Bar[]): void;
   setTradeOverlayMode(mode: TradeOverlayMode): void;
   setSelectedTrade(tradeId: number | null): void;
+  /** Set symbol for display and accessibility */
+  setSymbol(symbol: string): void;
   /** Strategy signals display */
   setSignals(signals: Signal[], bars: Bar[]): void;
   setSignalsVisible(visible: boolean): void;
@@ -95,8 +97,29 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
 
   const drawingCanvas = document.createElement("canvas");
   drawingCanvas.className = "drawing-canvas";
+  drawingCanvas.setAttribute("aria-label", "Chart drawing overlay");
+  drawingCanvas.setAttribute("role", "img");
   container.style.position = "relative";
+  container.setAttribute("role", "region");
   container.appendChild(drawingCanvas);
+
+  let currentSymbol = "";
+  const updateAriaLabel = () => {
+    if (currentBars.length === 0) {
+      container.setAttribute("aria-label", currentSymbol ? `${currentSymbol} chart: no data` : "Chart: no data");
+      return;
+    }
+    const first = currentBars[0];
+    const last = currentBars[currentBars.length - 1];
+    const d1 = new Date(first.time * 1000).toISOString().slice(0, 10);
+    const d2 = new Date(last.time * 1000).toISOString().slice(0, 10);
+    const sym = currentSymbol || "Price";
+    const p = precisionFor(last.close);
+    container.setAttribute(
+      "aria-label",
+      `${sym} chart from ${d1} to ${d2}, last price ${p > 0 ? last.close.toFixed(p) : last.close}`
+    );
+  };
 
   let currentBars: Bar[] = [];
   let lastTrades: Trade[] = [];
@@ -241,11 +264,17 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       return () => autoScaleListeners.delete(cb);
     },
 
+    setSymbol(symbol: string) {
+      currentSymbol = symbol;
+      updateAriaLabel();
+    },
+
     setBars(bars, fit = false) {
       if (bars.length === 0) {
         currentBars = [];
         candles.setData([]);
         volume.setData([]);
+        updateAriaLabel();
         return;
       }
 
@@ -280,6 +309,7 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
         candles.update(candleItem);
         volume.update(volumeItem);
         drawings.render();
+        updateAriaLabel();
         return;
       }
 
@@ -336,6 +366,7 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
         timeScale.setVisibleLogicalRange(prevRange);
       }
       drawings.render();
+      updateAriaLabel();
     },
 
     fit() {

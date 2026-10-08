@@ -17,8 +17,7 @@ export function mountReplayBar(controller: ReplayController): ReplayBarHandle {
   const liveBtn = $("replay-live") as HTMLButtonElement;
   const ticksCanvas = document.getElementById("replay-ticks-canvas") as HTMLCanvasElement | null;
 
-  playBtn.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
+  playBtn.addEventListener("click", () => {
     controller.togglePlay();
   });
   prevBtn.addEventListener("click", () => controller.stepBackward());
@@ -28,7 +27,7 @@ export function mountReplayBar(controller: ReplayController): ReplayBarHandle {
   slider.addEventListener("change", () => controller.seek(Number(slider.value)));
   liveBtn.addEventListener("click", () => controller.jumpToLive());
 
-  // Keyboard shortcuts: Space (play/pause), ArrowLeft (step back), ArrowRight (step forward)
+  // Keyboard shortcuts: Space (play/pause), ArrowLeft (step back), ArrowRight (step forward), R (reset)
   window.addEventListener("keydown", (e) => {
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) {
@@ -43,6 +42,9 @@ export function mountReplayBar(controller: ReplayController): ReplayBarHandle {
     } else if (e.code === "ArrowRight") {
       e.preventDefault();
       controller.stepForward();
+    } else if (e.code === "KeyR" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      controller.seek(0);
     }
   });
 

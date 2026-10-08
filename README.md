@@ -112,10 +112,10 @@ Reviewing algorithmic trading strategies usually means inspecting how individual
 │                        Web Terminal (Vanilla TS / Canvas)                       │
 │                                                                                 │
 │  ┌────────────────────────┐  ┌────────────────────────┐  ┌──────────────────┐   │
-│  │ Lightweight Charts v4  │  │  Custom Canvas Layer   │  │   Trade Ledger   │   │
-│  │ - Candlesticks & Volume│  │  - Trailing Stop Steps │  │ - Sortable rows  │   │
+│  │ Lightweight Charts v4  │  │ Chart Overlays & Canvas│  │   Trade Ledger   │   │
+│  │ - Candlesticks & Volume│  │  - Trailing Stop Lines │  │ - Tabbed views   │   │
 │  │ - Timeframe Resampling │  │  - Entry/Exit Markers  │  │ - In-cell R bars │   │
-│  │ - Bar Close Countdown  │  │  - Dynamic Drawings    │  │ - MAE / MFE      │   │
+│  │ - Bar Close Countdown  │  │  - User Drawing Tools  │  │ - MAE / MFE      │   │
 │  └────────────────────────┘  └────────────────────────┘  └──────────────────┘   │
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
 │  │ Replay & Ghost Controller (Playback state machine, speed, scrub timeline)│   │
@@ -132,7 +132,7 @@ The ingestion layer (`src/ingestion/`) loads time-series and trade data from var
   - Bars: Rejects non-finite values (`NaN`, `±Inf`), negative volume, non-positive timestamps, inverted ranges (`low > high`), and prices where open or close fall outside high and low.
   - Trades: Checks for positive position size and entry price, chronological order (`exit_time >= entry_time`), and finite stop-loss coordinates.
 - **Deduplication and Sorting**: Bars are sorted chronologically. If two bars share the exact same timestamp, the loader fails fast with a `DuplicateBar` error instead of silently dropping data.
-- **Apache Parquet Access**: Reads Parquet files directly via Arrow record batches, mapping columns to typed Rust structs without intermediate string parsing.
+- **Apache Parquet Access**: Reads Parquet files directly via Arrow record batches, mapping columns to typed Rust structs with support for primitive numeric encodings, dictionary-encoded strings, and ISO timestamp string parsing.
 
 ### Replay Engine & Hindsight-Free Ghost Mode
 
@@ -157,10 +157,9 @@ For live monitoring and bot integration:
 
 The browser terminal (`web/src/`) is written in strict TypeScript without UI framework overhead:
 
-- Uses Lightweight Charts v4 to render candlestick and volume series on HTML5 Canvas.
-- Custom pixel-aligned overlay layers draw stepped trailing stop lines, take-profit levels, and trade markers directly over the chart.
-- The drawing suite supports trendlines, rays, horizontal and vertical levels, Fibonacci retracements, position risk/reward brackets, price/time boxes, and measurement rulers. A magnet toggle snaps points directly to bar OHLC values.
-- Client-side resampling aggregates base bars into larger timeframes (1s, 5s, 15s, 1m, 3m, 5m, 15m, 30m, 1h, 4h, 1D) without requesting new data from the server.
+- Uses Lightweight Charts v4 to render candlestick and volume series, with native line series for stepped trailing stop paths and series markers for trade entries and exits.
+- An HTML5 canvas overlay supports user drawings (trendlines, rays, horizontal and vertical levels, Fibonacci retracements, position risk/reward brackets, price/time boxes, and measurement rulers). A magnet toggle snaps points directly to bar OHLC values.
+- Client-side resampling aggregates base bars into 20 higher timeframes (1m to 1M) without requesting new data from the server.
 
 ---
 
@@ -175,14 +174,14 @@ The browser terminal (`web/src/`) is written in strict TypeScript without UI fra
 | | Discrete Speeds | Configurable speed steps from `1x` to `100x`. |
 | | Ghost Execution Mode | Hides future bars and trade exits during session review. |
 | **Visualizer** | Dense Terminal Layout | 3-column / 3-row grid with responsive drawers, popups, and bottom sheet ledger. |
-| | Multi-Timeframe Resampling | Real-time bar aggregation across 11 timeframes without backend roundtrips. |
+| | Multi-Timeframe Resampling | Real-time bar aggregation across 20 timeframes (1m to 1M) without backend roundtrips. |
 | | Dynamic Drawing Suite | Trendlines, rays, levels, Fibonacci retracements, position brackets, and measurement tools. |
 | | OHLC Magnet Snap | Locks drawing control points to exact bar open, high, low, or close prices. |
-| | Bar Close Countdown | Displays real-time countdown timer to the completion of the active candle. |
+| | Bar Close Countdown | Displays real-time countdown timer to the completion of the active candle in live sessions. |
 | **Analytics** | Risk Lifecycle Overlays | Visualizes entry arrows, exit markers, take-profit levels, and stepped stop-loss paths. |
-| | Excursion Tracking | Computes Maximum Adverse Excursion (MAE) and Maximum Favorable Excursion (MFE). |
-| | Performance Metrics | Net PnL, Win Rate, Profit Factor, Average R, Drawdown, and fee accounting. |
-| | Interactive Trade Ledger | Filterable and sortable trade table with in-cell R-multiple micro-bars. |
+| | Excursion Tracking | Visualizes per-trade Maximum Adverse Excursion (MAE) and Maximum Favorable Excursion (MFE). |
+| | Performance Metrics | Net PnL, Win Rate, Profit Factor, Expected Payoff, Average R, Drawdown, and fee accounting. |
+| | Interactive Trade Ledger | Tabbed trade ledger (Positions, Closed Trades, Signals) with in-cell R-multiple micro-bars. |
 | **Deployment** | Standalone Binary | Bakes frontend web distribution into the Rust binary using `rust-embed`. |
 | | Live Daemon Streaming | WebSocket streaming interface (`/ws/stream`) for live algorithmic trading feeds. |
 | | Library Embedding | Directly embeddable into host Rust binaries via `markout::serve`. |
@@ -208,7 +207,7 @@ markout/
 │   ├── event_bus.rs          # MarketEvent definitions and Tokio broadcast bus
 │   ├── replay.rs             # In-memory replay state machine and speed controls
 │   ├── server.rs             # Axum HTTP router, WebSocket stream, and static assets
-│   ├── stats.rs              # Trade metrics computation (PnL, MAE, MFE, Drawdown)
+│   ├── stats.rs              # Aggregate performance metrics (PnL, Win Rate, Profit Factor, Drawdown)
 │   ├── models/               # Domain data models
 │   │   ├── mod.rs            # Re-exports for bar, trade, and signal structures
 │   │   ├── bar.rs            # Bar and Tick definitions
@@ -363,10 +362,11 @@ async fn main() -> anyhow::Result<()> {
         host: "127.0.0.1".into(),
         port: 8080,
         mode: Mode::Live {
-            feed: Some("native".into()),
+            feed: None,
             symbol: Some("BTCUSDT".into()),
             tf: Some("1m".into()),
         },
+        ..Default::default()
     };
 
     let server_bus = bus.clone();
@@ -601,9 +601,9 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 Key test areas:
-- **`ingestion::tests`**: Tests CSV, JSON, Parquet, and SQLite loaders against malformed rows, timestamp scaling variations, out-of-order candles, and duplicate bar timestamps.
+- **Ingestion tests**: Tests CSV, JSON, Parquet, and SQLite loaders across `src/ingestion/` modules and `tests/` integration suites against malformed rows, timestamp scaling variations, out-of-order candles, and duplicate bar timestamps.
 - **`replay::tests`**: Tests discrete speed multiplier transitions, candle-by-candle stepping, and boundary conditions.
-- **`stats::tests`**: Validates win rate, net PnL, profit factor, average R, and drawdown calculations.
+- **`stats::tests`**: Validates win rate, net PnL, profit factor, expected payoff, average R, and drawdown calculations.
 - **`server::tests`**: Integration tests checking Axum HTTP routing, JSON serialization, and fallback handlers.
 
 ### Frontend Unit Tests

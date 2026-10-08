@@ -135,6 +135,7 @@ async function main(): Promise<void> {
   let view: Bar[] = bars;
 
   renderSymbol(symbol);
+  chart.setSymbol(symbol);
   renderHeaderStats(stats);
   renderStats(stats, trades);
 
@@ -235,7 +236,7 @@ async function main(): Promise<void> {
 
     renderTicker(frame.visibleBars);
     const latestBar = frame.visibleBars[frame.visibleBars.length - 1];
-    setBarCountdownContext(latestBar ? latestBar.time : null, liveState.getActive());
+    setBarCountdownContext(latestBar ? latestBar.time : null, liveState.getActive(), health.mode === "live");
     renderLegend(null, latestBar);
   });
   const apply = () => {
@@ -251,7 +252,7 @@ async function main(): Promise<void> {
     replayBar.setTrades(overlayTrades, view);
     chart.fit();
     const latestBar = view[view.length - 1];
-    setBarCountdownContext(latestBar ? latestBar.time : null, active);
+    setBarCountdownContext(latestBar ? latestBar.time : null, active, health.mode === "live");
     chart.drawings.setContext(symbol, active);
     renderTimeframes(base, active, (sec) => {
       if (liveState.setActive(sec)) {
@@ -292,6 +293,7 @@ async function main(): Promise<void> {
         if (symbol === "—" && event.data.symbol) {
           symbol = event.data.symbol;
           renderSymbol(symbol);
+          chart.setSymbol(symbol);
         }
         const visible = replay.getVisibleBars();
         const last = visible[visible.length - 1];
@@ -309,6 +311,7 @@ async function main(): Promise<void> {
         if (symbol === "—" && t.symbol) {
           symbol = t.symbol;
           renderSymbol(symbol);
+          chart.setSymbol(symbol);
           chart.drawings.setContext(symbol, liveState.getActive());
         }
         overlayTrades = trades.filter((x) => x.symbol === symbol);

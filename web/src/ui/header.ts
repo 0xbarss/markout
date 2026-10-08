@@ -1,6 +1,6 @@
-import { $, h } from "../dom";
-import { fmtPrice, fmtSigned, signClass } from "../format";
-import { isResamplable, TIMEFRAMES } from "../resample";
+import { $, h } from "../dom.ts";
+import { fmtPrice, fmtSigned, signClass } from "../format.ts";
+import { isResamplable, TIMEFRAMES } from "../resample.ts";
 import type { AccountSnapshot, Bar, Stats, Tick } from "../types.ts";
 
 export function renderSymbol(symbol: string): void {
@@ -44,6 +44,7 @@ function flashTicker(newPrice: number): void {
 
 let currentLastBarTime: number | null = null;
 let currentTimeframeSec: number = 60;
+let currentIsLiveMode: boolean = false;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 
 export function formatCountdown(sec: number): string {
@@ -57,31 +58,53 @@ export function formatCountdown(sec: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export function setBarCountdownContext(lastBarTime: number | null, timeframeSec: number): void {
+export function setBarCountdownContext(lastBarTime: number | null, timeframeSec: number, isLive: boolean = false): void {
   currentLastBarTime = lastBarTime;
+  currentIsLiveMode = isLive;
   if (timeframeSec > 0) {
     currentTimeframeSec = timeframeSec;
   }
   renderCountdown();
 
-  if (countdownTimer === null) {
-    countdownTimer = setInterval(() => {
-      renderCountdown();
-    }, 1000);
+  const now = Math.floor(Date.now() / 1000);
+  const isRecent = currentLastBarTime !== null && currentLastBarTime + currentTimeframeSec >= now - 2 * currentTimeframeSec;
+  const shouldRun = currentIsLiveMode || isRecent;
+
+  if (shouldRun) {
+    if (countdownTimer === null) {
+      countdownTimer = setInterval(() => {
+        renderCountdown();
+      }, 1000);
+    }
+  } else if (countdownTimer !== null) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
   }
+}
+
+export function computeCountdown(
+  lastBarTime: number | null,
+  timeframeSec: number,
+  isLive: boolean,
+  now: number,
+): string {
+  if (lastBarTime === null || timeframeSec <= 0) {
+    return "—";
+  }
+  const isRecent = lastBarTime + timeframeSec >= now - 2 * timeframeSec;
+  if (!isLive && !isRecent) {
+    return "—";
+  }
+  const closeTime = lastBarTime + timeframeSec;
+  const remaining = Math.max(0, closeTime - now);
+  return formatCountdown(remaining);
 }
 
 function renderCountdown(): void {
   const el = document.getElementById("bar-countdown");
   if (!el) return;
-  if (currentLastBarTime === null || currentTimeframeSec <= 0) {
-    el.textContent = "—";
-    return;
-  }
   const now = Math.floor(Date.now() / 1000);
-  const closeTime = currentLastBarTime + currentTimeframeSec;
-  const remaining = Math.max(0, closeTime - now);
-  el.textContent = formatCountdown(remaining);
+  el.textContent = computeCountdown(currentLastBarTime, currentTimeframeSec, currentIsLiveMode, now);
 }
 
 export function renderTicker(bars: Bar[]): void {

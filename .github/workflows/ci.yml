@@ -42,7 +42,35 @@ jobs:
       - name: Verify published crate contents
         run: |
           rm -rf web/node_modules
-          cargo package --list --allow-dirty | grep -vE '^(src/|web/dist/|examples/|build\.rs|Cargo\.|LICENSE|README|CONTRIBUTING|\.cargo_vcs_info)' && exit 1 || true
+          if cargo package --list --allow-dirty | grep -vE '^(src/|web/dist/|examples/|build\.rs|Cargo\.|LICENSE|README|CONTRIBUTING|\.cargo_vcs_info)'; then
+            echo "Unexpected files in cargo package list"
+            exit 1
+          fi
+
+  release-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web assets
+        run: npm ci && npm run build
+        working-directory: web
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test cargo install from path
+        run: cargo install --path . --locked
+
+      - name: Verify installed binary
+        run: markout --version
 
   msrv:
     runs-on: ubuntu-latest

@@ -141,6 +141,7 @@ export function mountLedger(
   let selectedSignalId: string | null = null;
 
   const render = () => {
+    tabs.setAttribute("role", "tablist");
     tabs.replaceChildren();
     const tabList: [Tab, string, number][] = [
       ["positions", "Positions", open.length],
@@ -152,6 +153,8 @@ export function mountLedger(
 
     for (const [id, label, n] of tabList) {
       const b = h("button", id === active ? "active" : "", `${label} (${n})`);
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", id === active ? "true" : "false");
       b.addEventListener("click", () => { active = id; render(); });
       tabs.append(b);
     }
@@ -174,8 +177,15 @@ export function mountLedger(
       } else {
         for (const s of currentSignals) {
           const tr = signalRow(s);
-          if (s.id === selectedSignalId) tr.classList.add("selected");
-          tr.addEventListener("click", () => {
+          tr.setAttribute("tabindex", "0");
+          tr.setAttribute("role", "row");
+          if (s.id === selectedSignalId) {
+            tr.classList.add("selected");
+            tr.setAttribute("aria-selected", "true");
+          } else {
+            tr.setAttribute("aria-selected", "false");
+          }
+          const activate = () => {
             if (selectedSignalId === s.id) {
               selectedSignalId = null;
               onSelectSignal?.(null);
@@ -184,6 +194,13 @@ export function mountLedger(
               onSelectSignal?.(s);
             }
             render();
+          };
+          tr.addEventListener("click", activate);
+          tr.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              activate();
+            }
           });
           body.append(tr);
         }
@@ -199,8 +216,15 @@ export function mountLedger(
       } else {
         for (const t of list) {
           const tr = row(t);
-          if (t.id === selectedTradeId) tr.classList.add("selected");
-          tr.addEventListener("click", () => {
+          tr.setAttribute("tabindex", "0");
+          tr.setAttribute("role", "row");
+          if (t.id === selectedTradeId) {
+            tr.classList.add("selected");
+            tr.setAttribute("aria-selected", "true");
+          } else {
+            tr.setAttribute("aria-selected", "false");
+          }
+          const activate = () => {
             if (selectedTradeId === t.id) {
               selectedTradeId = null;
               onSelect(null);
@@ -209,6 +233,13 @@ export function mountLedger(
               onSelect(t);
             }
             render();
+          };
+          tr.addEventListener("click", activate);
+          tr.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              activate();
+            }
           });
           body.append(tr);
         }

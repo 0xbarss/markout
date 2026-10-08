@@ -200,7 +200,7 @@
         </button>
         <button id="replay-speed" class="speed-btn" title="Replay speed" aria-label="Replay speed">1x</button>
         <div class="replay-slider-wrap">
-          <canvas id="replay-ticks-canvas" class="replay-ticks-canvas"></canvas>
+          <canvas id="replay-ticks-canvas" class="replay-ticks-canvas" role="img" aria-label="Replay timeline trade markers"></canvas>
           <input id="replay-slider" type="range" min="0" max="0" value="0" aria-label="Replay position timeline" />
         </div>
         <span id="replay-counter" class="counter">0 / 0</span>
@@ -240,7 +240,7 @@
     </aside>
 
     <section class="ledger">
-      <div class="sheet-handle" id="sheet-handle" role="button" aria-label="Toggle trade sheet">
+      <div class="sheet-handle" id="sheet-handle" role="button" tabindex="0" aria-label="Toggle trade sheet">
         <span class="handle-bar"></span>
         <div id="mobile-summary-strip" class="mobile-summary-strip">
           <span id="mob-wr">WR: —</span>

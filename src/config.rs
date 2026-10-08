@@ -122,6 +122,24 @@ pub struct Config {
     pub lenient: bool,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            host: "127.0.0.1".into(),
+            port: 8080,
+            mode: Mode::Offline {
+                trades: None,
+                bars: None,
+                strategy: None,
+            },
+            allow_hosts: Vec::new(),
+            allow_origins: Vec::new(),
+            allow_ws_publish: false,
+            lenient: false,
+        }
+    }
+}
+
 impl From<Cli> for Config {
     fn from(cli: Cli) -> Self {
         let mode = match cli.command {

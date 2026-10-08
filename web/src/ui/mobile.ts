@@ -35,8 +35,15 @@ export function initMobileDrawer(): void {
   });
 
   if (sheetHandle && ledger) {
+    sheetHandle.setAttribute("tabindex", "0");
     sheetHandle.addEventListener("click", () => {
       ledger.classList.toggle("expanded");
+    });
+    sheetHandle.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        ledger.classList.toggle("expanded");
+      }
     });
 
     let touchStartY = 0;
