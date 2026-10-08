@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/markout-app.svg)](https://crates.io/crates/markout-app)
 [![Docs.rs](https://docs.rs/markout-app/badge.svg)](https://docs.rs/markout-app)
 [![Release](https://img.shields.io/github/v/release/0xbarss/markout.svg)](https://github.com/0xbarss/markout/releases)
-[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![TypeScript](https://img.shields.io/badge/typescript-5.4%2B-blue.svg)](https://www.typescriptlang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Author](https://img.shields.io/badge/author-0xbarss-purple.svg)](https://github.com/0xbarss)
@@ -256,7 +256,7 @@ cargo install markout-app
 
 ### Building from Source
 
-To compile `markout` into a standalone binary embedding the web UI, install the standard Rust toolchain (1.75+) and Node.js (18+).
+To compile `markout` into a standalone binary embedding the web UI, install the standard Rust toolchain (1.88+) and Node.js (22+).
 
 ```bash
 # 1. Clone the repository
