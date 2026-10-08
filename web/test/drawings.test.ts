@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { drawFibonacci, FIB_LEVELS } from "../src/drawings/fibonacci.ts";
-import { DrawingManager } from "../src/drawings/manager.ts";
+import { DrawingManager, generateDrawingId, isValidDrawing, parseStoredDrawings } from "../src/drawings/manager.ts";
+import { formatDuration } from "../src/drawings/measure.ts";
 import { formatRgba, parseColor } from "../src/drawings/style_utils.ts";
 import type { CoordinateConverter, Drawing, FibonacciDrawing } from "../src/drawings/types.ts";
 
@@ -464,6 +465,107 @@ test("drawing manager: measure tool creates temporary overlay and dismisses on c
   // Clicking anywhere dismisses active measure
   canvas.trigger("pointerdown", { clientX: 300, clientY: 300 });
   assert.equal(mgr.getDrawings().length, 0);
+});
+
+test("measure: formatDuration formats second, minute, hour and day scales accurately", () => {
+  assert.equal(formatDuration(59), "59s");
+  assert.equal(formatDuration(60), "1m");
+  assert.equal(formatDuration(3600), "1h");
+  assert.equal(formatDuration(5400), "1h 30m");
+  assert.equal(formatDuration(86400), "1d");
+  assert.equal(formatDuration(90000), "1d 1h");
+});
+
+test("drawing manager: generateDrawingId produces unique IDs", () => {
+  const ids = new Set<string>();
+  for (let i = 0; i < 100; i++) {
+    ids.add(generateDrawingId("d"));
+  }
+  assert.equal(ids.size, 100);
+});
+
+test("drawing manager: storage validation drops corrupted entries and parses versioned envelopes", () => {
+  assert.equal(isValidDrawing(null), false);
+  assert.equal(isValidDrawing({ id: "x", type: "trendline" }), false);
+  assert.equal(isValidDrawing({ id: "x", type: "trendline", p1: { time: 100, price: 10 }, p2: null }), false);
+
+  const validTrendline: Drawing = {
+    id: "tl_1",
+    type: "trendline",
+    p1: { time: 1000, price: 100 },
+    p2: { time: 1060, price: 105 },
+  };
+  assert.equal(isValidDrawing(validTrendline), true);
+
+  const rawArray = JSON.stringify([
+    { id: "bad_1", type: "trendline" },
+    validTrendline,
+  ]);
+  const parsedFromArray = parseStoredDrawings(rawArray);
+  assert.equal(parsedFromArray.length, 1);
+  assert.equal(parsedFromArray[0].id, "tl_1");
+
+  const rawEnvelope = JSON.stringify({
+    v: 1,
+    drawings: [validTrendline, { id: "bad_2", type: "horizontal" }],
+  });
+  const parsedFromEnvelope = parseStoredDrawings(rawEnvelope);
+  assert.equal(parsedFromEnvelope.length, 1);
+  assert.equal(parsedFromEnvelope[0].id, "tl_1");
+
+  assert.deepEqual(parseStoredDrawings("invalid json"), []);
+});
+
+test("drawing manager: plain clicks do not consume undo history", () => {
+  const canvas = new MockCanvas();
+  const mgr = new DrawingManager(canvas as any, mockConverter);
+
+  const d: Drawing = {
+    id: "tl_undo",
+    type: "trendline",
+    p1: { time: 1_700_000_000, price: 100 },
+    p2: { time: 1_700_000_060, price: 120 },
+  };
+  mgr.addDrawing(d);
+  assert.equal(mgr.getDrawings().length, 1);
+
+  // Click on the drawing multiple times without moving/dragging
+  for (let i = 0; i < 5; i++) {
+    canvas.trigger("pointerdown", { clientX: 30, clientY: 890 }); // near midpoint
+    canvas.trigger("pointerup", {});
+  }
+
+  // Exactly one undo should revert the addDrawing
+  mgr.undo();
+  assert.equal(mgr.getDrawings().length, 0, "plain clicks must not push undo entries");
+});
+
+test("drawing manager: dialog edit pattern restores original state on undo", () => {
+  const canvas = new MockCanvas();
+  const mgr = new DrawingManager(canvas as any, mockConverter);
+
+  const orig: Drawing = {
+    id: "tl_dialog",
+    type: "trendline",
+    p1: { time: 1_700_000_000, price: 100 },
+    p2: { time: 1_700_000_060, price: 120 },
+    color: "#ffffff",
+  };
+  mgr.addDrawing(orig);
+
+  const draft = { ...orig, color: "#ff0000" };
+  // Live preview update
+  mgr.updateDrawing(draft, false);
+  assert.equal((mgr.getDrawings()[0] as any).color, "#ff0000");
+
+  // OK clicked: restores original silently, then snapshots pre-edit state while applying draft
+  mgr.updateDrawing(orig, false);
+  mgr.updateDrawing(draft, true);
+  assert.equal((mgr.getDrawings()[0] as any).color, "#ff0000");
+
+  // Pressing undo restores the pre-dialog color (#ffffff)
+  mgr.undo();
+  assert.equal((mgr.getDrawings()[0] as any).color, "#ffffff");
 });
 
 

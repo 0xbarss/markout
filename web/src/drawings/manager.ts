@@ -15,6 +15,66 @@ import type {
   Point,
 } from "./types.ts";
 
+let nextIdCounter = 1;
+
+export function generateDrawingId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try {
+      return `${prefix}_${crypto.randomUUID()}`;
+    } catch (_) {}
+  }
+  return `${prefix}_${Date.now()}_${nextIdCounter++}`;
+}
+
+const isPoint = (p: unknown): p is Point =>
+  typeof p === "object" && p !== null && Number.isFinite((p as Point).time) && Number.isFinite((p as Point).price);
+
+export function isValidDrawing(d: unknown): d is Drawing {
+  if (!d || typeof d !== "object") return false;
+  const item = d as Record<string, unknown>;
+  if (typeof item.id !== "string" || !item.id) return false;
+  switch (item.type) {
+    case "trendline":
+    case "ray":
+    case "arrow":
+    case "fibonacci":
+    case "measure":
+    case "box_zone":
+      return isPoint(item.p1) && isPoint(item.p2);
+    case "horizontal":
+      return Number.isFinite(item.price);
+    case "vertical":
+      return Number.isFinite(item.time);
+    case "position":
+      return (
+        isPoint(item.entry) &&
+        Number.isFinite(item.targetPrice) &&
+        Number.isFinite(item.stopPrice) &&
+        Number.isFinite(item.endTime)
+      );
+    case "text":
+      return isPoint(item.p1) && typeof item.text === "string";
+    default:
+      return false;
+  }
+}
+
+export function parseStoredDrawings(raw: string): Drawing[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(isValidDrawing);
+    }
+    if (typeof parsed === "object" && parsed !== null) {
+      const obj = parsed as Record<string, unknown>;
+      if (Array.isArray(obj.drawings)) {
+        return obj.drawings.filter(isValidDrawing);
+      }
+    }
+  } catch (_) {}
+  return [];
+}
+
 export class DrawingManager {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -26,6 +86,7 @@ export class DrawingManager {
   private previewPoint: Point | null = null;
   private selectedId: string | null = null;
   private undoStack: Drawing[][] = [];
+  private pendingUndo: Drawing[] | null = null;
   private draggingHandle: { drawingId: string; handleIdx: number } | null = null;
   private draggingDrawing: { drawingId: string; startX: number; startY: number; startPt: Point } | null = null;
 
@@ -189,7 +250,7 @@ export class DrawingManager {
     if (!orig) return null;
 
     const clone: Drawing = JSON.parse(JSON.stringify(orig));
-    clone.id = `d_${Date.now()}`;
+    clone.id = generateDrawingId("d");
 
     // Calculate a clear visual offset in pixel space (30px right, 20px down)
     let dt = 3600;
@@ -369,14 +430,22 @@ export class DrawingManager {
     this.ctx.clearRect(0, 0, width, height);
 
     for (const d of this.drawings) {
-      this.drawSingle(d, width, height);
-      if (d.id === this.selectedId) {
-        this.drawSelectionHandles(d);
+      try {
+        this.drawSingle(d, width, height);
+        if (d.id === this.selectedId) {
+          this.drawSelectionHandles(d);
+        }
+      } catch (err) {
+        console.warn("Failed to render drawing:", d.id, err);
       }
     }
 
     if (this.activeMeasure) {
-      this.drawSingle(this.activeMeasure, width, height);
+      try {
+        this.drawSingle(this.activeMeasure, width, height);
+      } catch (err) {
+        console.warn("Failed to render active measure:", err);
+      }
     }
 
     if (this.pendingPoint && this.previewPoint) {
@@ -625,7 +694,7 @@ export class DrawingManager {
           const hit = !handleHit ? this.hitTest(px, py) : null;
 
           if (handleHit) {
-            this.pushUndo();
+            this.pendingUndo = JSON.parse(JSON.stringify(this.drawings));
             this.draggingHandle = handleHit;
             this.canvas.style.pointerEvents = "auto";
             try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
@@ -633,7 +702,7 @@ export class DrawingManager {
           }
 
           if (hit) {
-            this.pushUndo();
+            this.pendingUndo = JSON.parse(JSON.stringify(this.drawings));
             this.selectDrawing(hit.id);
             this.canvas.style.pointerEvents = "auto";
             const pt = this.eventToPoint(e);
@@ -692,7 +761,7 @@ export class DrawingManager {
         // Check if clicked on a selected drawing's control handle
         if (handleHit) {
           e.stopPropagation?.();
-          this.pushUndo();
+          this.pendingUndo = JSON.parse(JSON.stringify(this.drawings));
           this.draggingHandle = handleHit;
           try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
           return;
@@ -701,7 +770,7 @@ export class DrawingManager {
         // Check hit testing on drawings
         if (hit) {
           e.stopPropagation?.();
-          this.pushUndo();
+          this.pendingUndo = JSON.parse(JSON.stringify(this.drawings));
           this.selectDrawing(hit.id);
           this.draggingDrawing = { drawingId: hit.id, startX: px, startY: py, startPt: pt };
           try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
@@ -715,7 +784,7 @@ export class DrawingManager {
       // Single-click placement tools
       if (this.activeTool === "horizontal") {
         this.addDrawing({
-          id: `h_${Date.now()}`,
+          id: generateDrawingId("h"),
           type: "horizontal",
           price: pt.price,
           time: pt.time,
@@ -726,7 +795,7 @@ export class DrawingManager {
 
       if (this.activeTool === "vertical") {
         this.addDrawing({
-          id: `v_${Date.now()}`,
+          id: generateDrawingId("v"),
           type: "vertical",
           time: pt.time,
         });
@@ -738,7 +807,7 @@ export class DrawingManager {
         const onGotText = (text: string | null) => {
           if (text && text.trim().length > 0) {
             this.addDrawing({
-              id: `t_${Date.now()}`,
+              id: generateDrawingId("t"),
               type: "text",
               p1: pt,
               text: text.trim(),
@@ -765,7 +834,7 @@ export class DrawingManager {
         const p1 = this.pendingPoint;
         const p2 = pt;
         if (this.activeTool === "measure") {
-          this.activeMeasure = { id: `m_${Date.now()}`, type: "measure", p1, p2 };
+          this.activeMeasure = { id: generateDrawingId("m"), type: "measure", p1, p2 };
           this.pendingPoint = null;
           this.previewPoint = null;
           this.setTool("cursor");
@@ -774,7 +843,7 @@ export class DrawingManager {
         }
         const d = this.createPreviewDrawing(p1, p2);
         if (d) {
-          d.id = `d_${Date.now()}`;
+          d.id = generateDrawingId("d");
           this.addDrawing(d);
         }
         this.setTool("cursor");
@@ -813,12 +882,20 @@ export class DrawingManager {
       if (!pt) return;
 
       if (this.draggingHandle) {
+        if (this.pendingUndo) {
+          this.pushUndoSnapshot(this.pendingUndo);
+          this.pendingUndo = null;
+        }
         this.handleDragPoint(this.draggingHandle.drawingId, this.draggingHandle.handleIdx, pt);
         this.render();
         return;
       }
 
       if (this.draggingDrawing) {
+        if (this.pendingUndo) {
+          this.pushUndoSnapshot(this.pendingUndo);
+          this.pendingUndo = null;
+        }
         this.handleMoveDrawing(this.draggingDrawing.drawingId, pt, this.draggingDrawing.startPt);
         this.draggingDrawing.startPt = pt;
         this.render();
@@ -847,6 +924,7 @@ export class DrawingManager {
     });
 
     const finishDrag = (e: PointerEvent) => {
+      this.pendingUndo = null;
       if (this.draggingHandle || this.draggingDrawing) {
         try { this.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
         this.saveToStorage();
@@ -1096,6 +1174,11 @@ export class DrawingManager {
     if (this.undoStack.length > 50) this.undoStack.shift();
   }
 
+  private pushUndoSnapshot(snapshot: Drawing[]): void {
+    this.undoStack.push(snapshot);
+    if (this.undoStack.length > 50) this.undoStack.shift();
+  }
+
   private eventToPoint(e: PointerEvent): Point | null {
     const rect = this.canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -1124,7 +1207,7 @@ export class DrawingManager {
   private saveToStorage(): void {
     try {
       if (typeof localStorage !== "undefined") {
-        localStorage.setItem(this.storageKey(), JSON.stringify(this.drawings));
+        localStorage.setItem(this.storageKey(), JSON.stringify({ v: 1, drawings: this.drawings }));
       }
     } catch {
       // Storage unavailable or quota exceeded
@@ -1136,7 +1219,7 @@ export class DrawingManager {
       if (typeof localStorage !== "undefined") {
         const raw = localStorage.getItem(this.storageKey());
         if (raw) {
-          this.drawings = JSON.parse(raw);
+          this.drawings = parseStoredDrawings(raw);
           this.emitChange();
           return;
         }

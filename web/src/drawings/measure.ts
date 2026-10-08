@@ -1,4 +1,4 @@
-import { fmtSigned } from "../format.ts";
+import { fmtPrice, fmtSigned } from "../format.ts";
 import { applyLineDash } from "./style_utils.ts";
 import type { CoordinateConverter, MeasureDrawing } from "./types.ts";
 
@@ -8,11 +8,11 @@ function formatCompact(val: number): string {
   return String(Math.round(val));
 }
 
-function formatDuration(sec: number): string {
+export function formatDuration(sec: number): string {
   if (sec < 60) return `${sec}s`;
   const m = Math.floor(sec / 60);
   if (m < 60) return `${m}m`;
-  const h = Math.floor(sec / 60);
+  const h = Math.floor(m / 60);
   const remM = m % 60;
   if (h < 24) return remM > 0 ? `${h}h ${remM}m` : `${h}h`;
   const d = Math.floor(h / 24);
@@ -86,7 +86,7 @@ export function drawMeasure(
   ctx.fill();
 
   // TradingView-style Multi-line Floating Information Card
-  const priceLine = `${isUp ? "▲ +" : "▼ "}${Math.abs(deltaPrice).toFixed(2)} (${fmtSigned(pct, 2)}%)`;
+  const priceLine = `${isUp ? "▲ +" : "▼ "}${fmtPrice(Math.abs(deltaPrice))} (${fmtSigned(pct, 2)}%)`;
   const timeLine = `${barsCount !== null ? `${barsCount} bar${barsCount === 1 ? "" : "s"}, ` : ""}${durationStr}`;
   const volLine = rangeVol !== null && rangeVol > 0 ? `Vol ${formatCompact(rangeVol)}` : null;
 

@@ -538,6 +538,7 @@ export function openDrawingSettingsDialog(drawing: Drawing, manager: DrawingMana
         primary: true,
         onClick: (d) => {
           confirmed = true;
+          manager.updateDrawing(original, false);
           manager.updateDrawing(draft, true);
           d.close();
         },
