@@ -13,7 +13,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use super::{
     finish_trades, io_err, normalize_bars, normalize_time, validate_bar, IngestError, Result,
 };
-use crate::models::{Bar, ExitReason, StopPoint, Trade, TradeSide};
+use crate::models::{Bar, Direction, ExitReason, Signal, StopPoint, Trade, TradeSide};
 
 fn find_column_index(schema: &Schema, candidates: &[&str]) -> Option<usize> {
     for candidate in candidates {
@@ -754,6 +754,133 @@ pub fn load_trades_with_counters(
     Ok((finished, counters))
 }
 
+/// Load strategy signals from an Apache Parquet file.
+pub fn load_signals(path: &Path) -> Result<Vec<Signal>> {
+    let file = File::open(path).map_err(|e| io_err(path, e))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+    let schema = builder.schema().clone();
+
+    let time_idx = find_column_index(
+        &schema,
+        &[
+            "time",
+            "timestamp",
+            "timestamp_ms",
+            "datetime",
+            "date",
+            "ts",
+            "t",
+        ],
+    )
+    .ok_or_else(|| IngestError::MissingColumn {
+        table: "parquet_signals",
+        column: "time/timestamp",
+    })?;
+
+    let dir_idx = find_column_index(&schema, &["direction", "action", "side", "signal"])
+        .ok_or_else(|| IngestError::MissingColumn {
+            table: "parquet_signals",
+            column: "direction",
+        })?;
+
+    let price_idx =
+        find_column_index(&schema, &["entry_price", "price", "entry"]).ok_or_else(|| {
+            IngestError::MissingColumn {
+                table: "parquet_signals",
+                column: "entry_price",
+            }
+        })?;
+
+    let id_idx = find_column_index(&schema, &["id", "signal_id"]);
+    let sym_idx = find_column_index(&schema, &["symbol", "sym", "ticker", "pair"]);
+    let sl_idx = find_column_index(&schema, &["stop_loss", "sl", "initial_sl"]);
+    let tp_idx = find_column_index(&schema, &["take_profit", "tp"]);
+    let strat_idx = find_column_index(&schema, &["strategy", "name"]);
+    let comment_idx = find_column_index(
+        &schema,
+        &["comment", "note", "notes", "desc", "description"],
+    );
+
+    let reader = builder.build()?;
+    let mut signals = Vec::new();
+    let mut row_count = 0;
+
+    for batch_res in reader {
+        let batch = batch_res?;
+        let time_col = batch.column(time_idx);
+        let dir_col = batch.column(dir_idx);
+        let price_col = batch.column(price_idx);
+
+        for r in 0..batch.num_rows() {
+            row_count += 1;
+            let id = id_idx
+                .and_then(|i| get_string(batch.column(i).as_ref(), r))
+                .unwrap_or_default();
+            let signal_id = if id.is_empty() {
+                format!("sig_{row_count}")
+            } else {
+                id.clone()
+            };
+
+            let time =
+                get_timestamp(time_col.as_ref(), r).ok_or_else(|| IngestError::InvalidSignal {
+                    id: signal_id.clone(),
+                    reason: "missing or invalid timestamp".to_string(),
+                })?;
+
+            let dir_raw =
+                get_string(dir_col.as_ref(), r).ok_or_else(|| IngestError::InvalidSignal {
+                    id: signal_id.clone(),
+                    reason: "missing or invalid direction".to_string(),
+                })?;
+
+            let direction: Direction = match dir_raw.trim().to_ascii_lowercase().as_str() {
+                "buy" | "long" | "enter_long" | "bid" | "b" | "1" => Direction::Buy,
+                "sell" | "short" | "enter_short" | "ask" | "s" | "-1" => Direction::Sell,
+                "hold" | "neutral" | "none" | "0" => Direction::Hold,
+                _ => {
+                    return Err(IngestError::InvalidSignal {
+                        id: signal_id,
+                        reason: format!("direction `{dir_raw}`: unrecognized direction"),
+                    });
+                }
+            };
+
+            let entry_price =
+                get_f64(price_col.as_ref(), r).ok_or_else(|| IngestError::InvalidSignal {
+                    id: signal_id.clone(),
+                    reason: "missing or invalid entry price".to_string(),
+                })?;
+
+            let stop_loss = sl_idx
+                .and_then(|i| get_f64(batch.column(i).as_ref(), r))
+                .unwrap_or(0.0);
+
+            let take_profit = tp_idx
+                .and_then(|i| get_f64(batch.column(i).as_ref(), r))
+                .unwrap_or(0.0);
+
+            let symbol = sym_idx.and_then(|i| get_string(batch.column(i).as_ref(), r));
+            let strategy = strat_idx.and_then(|i| get_string(batch.column(i).as_ref(), r));
+            let comment = comment_idx.and_then(|i| get_string(batch.column(i).as_ref(), r));
+
+            signals.push(Signal {
+                id,
+                time,
+                symbol,
+                direction,
+                entry_price,
+                stop_loss,
+                take_profit,
+                strategy,
+                comment,
+            });
+        }
+    }
+
+    super::signal::finish_signals(signals)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1219,5 +1346,70 @@ mod tests {
             err4,
             IngestError::InvalidTrade { ref reason, .. } if reason.contains("null id in id column")
         ));
+    }
+
+    #[test]
+    fn test_load_signals_parquet() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, true),
+            Field::new("timestamp", DataType::Int64, false),
+            Field::new("symbol", DataType::Utf8, true),
+            Field::new("action", DataType::Utf8, false),
+            Field::new("price", DataType::Float64, false),
+            Field::new("sl", DataType::Float64, true),
+            Field::new("tp", DataType::Float64, true),
+            Field::new("name", DataType::Utf8, true),
+            Field::new("note", DataType::Utf8, true),
+        ]));
+
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(vec![Some("sig-001"), Some("sig-002")])),
+                Arc::new(Int64Array::from(vec![1700000000, 1700000060])),
+                Arc::new(StringArray::from(vec![Some("BTCUSDT"), Some("ETHUSDT")])),
+                Arc::new(StringArray::from(vec!["buy", "sell"])),
+                Arc::new(Float64Array::from(vec![65000.0, 3500.0])),
+                Arc::new(Float64Array::from(vec![Some(64000.0), Some(3600.0)])),
+                Arc::new(Float64Array::from(vec![Some(67000.0), Some(3300.0)])),
+                Arc::new(StringArray::from(vec![
+                    Some("EMA Breakout"),
+                    Some("RSI Divergence"),
+                ])),
+                Arc::new(StringArray::from(vec![
+                    Some("20/50 cross"),
+                    Some("bearish div"),
+                ])),
+            ],
+        )
+        .unwrap();
+
+        let file = NamedTempFile::new().unwrap();
+        let mut writer = ArrowWriter::try_new(file.reopen().unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+
+        let sigs = load_signals(file.path()).unwrap();
+        assert_eq!(sigs.len(), 2);
+
+        assert_eq!(sigs[0].id, "sig-001");
+        assert_eq!(sigs[0].time, 1700000000);
+        assert_eq!(sigs[0].symbol.as_deref(), Some("BTCUSDT"));
+        assert_eq!(sigs[0].direction, Direction::Buy);
+        assert_eq!(sigs[0].entry_price, 65000.0);
+        assert_eq!(sigs[0].stop_loss, 64000.0);
+        assert_eq!(sigs[0].take_profit, 67000.0);
+        assert_eq!(sigs[0].strategy.as_deref(), Some("EMA Breakout"));
+        assert_eq!(sigs[0].comment.as_deref(), Some("20/50 cross"));
+
+        assert_eq!(sigs[1].id, "sig-002");
+        assert_eq!(sigs[1].time, 1700000060);
+        assert_eq!(sigs[1].symbol.as_deref(), Some("ETHUSDT"));
+        assert_eq!(sigs[1].direction, Direction::Sell);
+        assert_eq!(sigs[1].entry_price, 3500.0);
+        assert_eq!(sigs[1].stop_loss, 3600.0);
+        assert_eq!(sigs[1].take_profit, 3300.0);
+        assert_eq!(sigs[1].strategy.as_deref(), Some("RSI Divergence"));
+        assert_eq!(sigs[1].comment.as_deref(), Some("bearish div"));
     }
 }

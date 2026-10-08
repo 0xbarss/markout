@@ -445,7 +445,7 @@ Options:
       --port <PORT>          Port to listen on [default: 8080]
       --trades <PATH>        Trades database or log file (alias: --db)
       --bars <PATH>          Bars file or directory (CSV, Parquet, or SQLite)
-      --strategy <PATH>      Strategy signals log file (JSONL or Parquet)
+      --strategy <PATH>      Strategy signals log file (JSONL, JSON, CSV, SQLite, or Parquet)
       --allow-host <HOST>    Allowed Host header values (can be repeated)
       --allow-origin <ORIGIN> Allowed WebSocket Origin values (can be repeated)
       --allow-ws-publish     Allow clients to publish MarketEvent frames over WebSocket
@@ -553,17 +553,30 @@ All frames exchanged over `/ws/stream` adhere to the tagged `MarketEvent` schema
 
 #### 3. Strategy Signals (`--strategy`)
 
-- **JSON Lines (`.jsonl`)**: Emits `Signal` objects:
+Supports JSON Lines (`.jsonl`), JSON (`.json`), CSV (`.csv`), SQLite (`.sqlite`), and Parquet (`.parquet`).
+
+- **Signal Schema (`.jsonl`)**:
   ```json
   {
     "id": "sig-001",
     "time": 1700000000,
     "direction": "buy",
-    "price": 65000.0,
-    "label": "EMA Breakout",
-    "metadata": { "period": 20 }
+    "entry_price": 65000.0,
+    "stop_loss": 64200.0,
+    "take_profit": 66200.0,
+    "strategy": "EMA Breakout",
+    "comment": "20/50 cross"
   }
   ```
+
+Accepted field and column aliases:
+- `time`: `timestamp`
+- `direction`: `action`, `side`, `signal` (values: `buy`/`long`, `sell`/`short`, `hold`/`neutral`)
+- `entry_price`: `price`, `entry`
+- `stop_loss`: `sl`, `initial_sl` (defaults to `0.0` if omitted)
+- `take_profit`: `tp` (defaults to `0.0` if omitted)
+- `strategy`: `name`
+- `comment`: `note`, `notes`
 
 ---
 

@@ -36,6 +36,7 @@ pub fn load(path: &Path) -> Result<Vec<Signal>> {
             parse_csv(BufReader::new(f))
         }
         "sqlite" | "sqlite3" | "db" => load_sqlite(path),
+        "parquet" => super::parquet::load_signals(path),
         _ => Err(IngestError::Io {
             path: path.display().to_string(),
             source: std::io::Error::new(
@@ -85,6 +86,29 @@ pub fn finish_signals(mut signals: Vec<Signal>) -> Result<Vec<Signal>> {
     Ok(signals)
 }
 
+const KNOWN_SIGNAL_KEYS: &[&str] = &[
+    "id",
+    "signal_id",
+    "time",
+    "timestamp",
+    "symbol",
+    "direction",
+    "action",
+    "side",
+    "signal",
+    "entry_price",
+    "price",
+    "stop_loss",
+    "sl",
+    "initial_sl",
+    "take_profit",
+    "tp",
+    "strategy",
+    "name",
+    "comment",
+    "note",
+];
+
 pub fn parse_jsonl<R: BufRead>(reader: R) -> Result<Vec<Signal>> {
     let mut out = Vec::new();
     for (i, line) in reader.lines().enumerate() {
@@ -93,8 +117,20 @@ pub fn parse_jsonl<R: BufRead>(reader: R) -> Result<Vec<Signal>> {
         if trimmed.is_empty() {
             continue;
         }
-        let sig: SignalRaw =
+        let val: serde_json::Value =
             serde_json::from_str(trimmed).map_err(|e| IngestError::InvalidSignal {
+                id: format!("signal line {}", i + 1),
+                reason: e.to_string(),
+            })?;
+        if let serde_json::Value::Object(map) = &val {
+            for k in map.keys() {
+                if !KNOWN_SIGNAL_KEYS.contains(&k.as_str()) {
+                    tracing::warn!("signal line {}: ignoring unrecognized field `{k}`", i + 1);
+                }
+            }
+        }
+        let sig: SignalRaw =
+            serde_json::from_value(val).map_err(|e| IngestError::InvalidSignal {
                 id: format!("signal line {}", i + 1),
                 reason: e.to_string(),
             })?;
@@ -519,5 +555,14 @@ mod tests {
             }
             other => panic!("expected InvalidSignal for NaN entry price, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_jsonl_with_unknown_fields() {
+        let jsonl = r#"{"id": "sig-extra", "time": 1700000000, "direction": "buy", "entry_price": 100.0, "stop_loss": 95.0, "label": "foo", "metadata": {"foo": "bar"}}"#;
+        let sigs = parse_jsonl(jsonl.as_bytes()).unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0].id, "sig-extra");
+        assert_eq!(sigs[0].entry_price, 100.0);
     }
 }
