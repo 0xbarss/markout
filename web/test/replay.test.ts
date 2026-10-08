@@ -336,3 +336,27 @@ test("replay controller: getVisibleBars caching and out-of-order append", () => 
   controller.destroy();
 });
 
+test("replay controller: preserves cursor timestamp across timeframe switch", () => {
+  const baseBars = makeBars(10);
+  const controller = new ReplayController(baseBars, []);
+
+  // Scrub back to index 4 (T0 + 4 * 60)
+  controller.seek(4);
+  assert.equal(controller.getCursor(), 4);
+  const preservedTime = controller.getVisibleBars().at(-1)?.time ?? null;
+  assert.equal(preservedTime, T0 + 4 * STEP);
+
+  // Switch timeframe to 5m (300s)
+  const fiveMinBars: Bar[] = [
+    { time: T0, open: 100, high: 110, low: 90, close: 105, volume: 50 },
+    { time: T0 + 300, open: 105, high: 115, low: 95, close: 110, volume: 50 },
+  ];
+
+  controller.setData(fiveMinBars, [], [], preservedTime);
+  // Cursor should be preserved at index 0 (T0 <= preservedTime) instead of jumping to the end (index 1)
+  assert.equal(controller.getCursor(), 0);
+  assert.equal(controller.getVisibleBars().at(-1)?.time, T0);
+
+  controller.destroy();
+});
+

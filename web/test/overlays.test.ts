@@ -5,7 +5,15 @@ import { buildMarkers } from "../src/overlays/markers.ts";
 import { buildSignalMarkers } from "../src/overlays/signals.ts";
 import { barIndexAt, locate } from "../src/overlays/snap.ts";
 import { buildTrail, spanOf } from "../src/overlays/sl_tp_trail.ts";
-import { baseInterval, isResamplable, resample } from "../src/resample.ts";
+import {
+  baseInterval,
+  bucketTime,
+  isResamplable,
+  resample,
+  resampleHindsightFree,
+  MONTH_SEC,
+  WEEK_SEC,
+} from "../src/resample.ts";
 import type { Bar, Signal, Trade } from "../src/types";
 
 const T0 = 1_700_000_100, STEP = 900;
@@ -148,6 +156,46 @@ test("resample: preserves original bars when target timeframe is not resamplable
   // 20m (1200s) is not resamplable from 15m (900s)
   const result = resample(sampleBars, 1200, 900);
   assert.deepEqual(result, sampleBars);
+});
+
+test("resample: calendar-aligned week boundary maps to preceding Monday 00:00 UTC", () => {
+  // 2024-01-03 12:00:00 UTC (Wednesday) -> 1704283200
+  const wednesdayTime = 1704283200;
+  const mondayTime = 1704067200; // 2024-01-01 00:00:00 UTC (Monday)
+  assert.equal(bucketTime(wednesdayTime, WEEK_SEC), mondayTime);
+  assert.equal(bucketTime(mondayTime, WEEK_SEC), mondayTime);
+
+  // Sunday night 2024-01-07 23:59:00 UTC -> still maps to Monday 2024-01-01
+  const sundayNight = mondayTime + WEEK_SEC - 60;
+  assert.equal(bucketTime(sundayNight, WEEK_SEC), mondayTime);
+});
+
+test("resample: calendar-aligned month boundary maps to 1st of month 00:00 UTC", () => {
+  // 2024-01-31 23:59:59 UTC
+  const jan31 = Math.floor(Date.UTC(2024, 0, 31, 23, 59, 59) / 1000);
+  const jan1 = Math.floor(Date.UTC(2024, 0, 1, 0, 0, 0) / 1000);
+  const feb1 = Math.floor(Date.UTC(2024, 1, 1, 0, 0, 0) / 1000);
+
+  assert.equal(bucketTime(jan31, MONTH_SEC), jan1);
+  assert.equal(bucketTime(jan1, MONTH_SEC), jan1);
+  assert.equal(bucketTime(feb1, MONTH_SEC), feb1);
+});
+
+test("resample: partial-bucket high/low excludes future base bars", () => {
+  const baseBars: Bar[] = [
+    { time: 0, open: 100, high: 102, low: 99, close: 101, volume: 10 },
+    { time: 60, open: 101, high: 108, low: 100, close: 105, volume: 15 },
+    { time: 120, open: 105, high: 125, low: 104, close: 120, volume: 20 }, // future bar
+  ];
+
+  // At cursor = 1 (time 60), bar at time 120 is in the future
+  const resampled = resampleHindsightFree(baseBars, 1, 300, 60);
+  assert.equal(resampled.length, 1);
+  assert.equal(resampled[0].open, 100);
+  assert.equal(resampled[0].high, 108); // excluded future high 125
+  assert.equal(resampled[0].low, 99);
+  assert.equal(resampled[0].close, 105); // excluded future close 120
+  assert.equal(resampled[0].volume, 25);
 });
 
 test("sample data: every trade produces a drawable, ordered trail", () => {

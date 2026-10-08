@@ -76,28 +76,48 @@ export function parseTimeframe(input: string | number): number | null {
   }
 }
 
+export const WEEK_SEC = 604800;
+export const MONTH_SEC = 2592000;
+const MONDAY_OFFSET = 259200; // 3 days in seconds (Unix epoch 1970-01-01 was Thursday; Monday was 3 days earlier)
+
+/** Align timestamp to bucket boundary in seconds. */
+export function bucketTime(t: number, sec: number): number {
+  if (sec === MONTH_SEC) {
+    const d = new Date(t * 1000);
+    return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000);
+  }
+  if (sec === WEEK_SEC) {
+    return Math.floor((t + MONDAY_OFFSET) / WEEK_SEC) * WEEK_SEC - MONDAY_OFFSET;
+  }
+  return Math.floor(t / sec) * sec;
+}
+
 /**
  * Checks if a target timeframe interval (in seconds) can be cleanly aggregated from a base interval.
- * Returns true only if targetSec >= baseSec and targetSec is an integer multiple of baseSec.
+ * Returns true only if targetSec >= baseSec and targetSec is an integer multiple of baseSec,
+ * or for 1M (month) when baseSec <= 1 day or 1 week.
  */
 export function isResamplable(baseSec: number, targetSec: number): boolean {
   if (baseSec <= 0 || targetSec <= 0) return false;
   if (targetSec < baseSec) return false;
+  if (targetSec === MONTH_SEC) {
+    return baseSec <= 86400 || baseSec === WEEK_SEC;
+  }
   return targetSec % baseSec === 0;
 }
 
-/** Aggregate bars into `sec`-second buckets aligned to the Unix epoch (UTC). */
+/** Aggregate bars into `sec`-second buckets aligned to calendar/epoch standards. */
 export function resample(bars: Bar[], sec: number, baseSec?: number): Bar[] {
   if (baseSec && !isResamplable(baseSec, sec)) {
     return bars;
   }
   const out: Bar[] = [];
   for (const b of bars) {
-    const t = Math.floor(b.time / sec) * sec;
+    const t = bucketTime(b.time, sec);
     const last = out[out.length - 1];
     if (last && last.time === t) {
-      last.high = Math.max(last.high, b.high);
-      last.low = Math.min(last.low, b.low);
+      if (b.high > last.high) last.high = b.high;
+      if (b.low < last.low) last.low = b.low;
       last.close = b.close;
       last.volume += b.volume;
     } else {
@@ -105,5 +125,20 @@ export function resample(bars: Bar[], sec: number, baseSec?: number): Bar[] {
     }
   }
   return out;
+}
+
+/**
+ * Resamples bars up to a cursor index, ensuring hindsight-free playback
+ * where the current in-progress bucket excludes future base bars.
+ */
+export function resampleHindsightFree(
+  baseBars: Bar[],
+  cursor: number,
+  sec: number,
+  baseSec?: number,
+): Bar[] {
+  if (baseBars.length === 0 || cursor < 0) return [];
+  const clamped = Math.min(cursor, baseBars.length - 1);
+  return resample(baseBars.slice(0, clamped + 1), sec, baseSec);
 }
 

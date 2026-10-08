@@ -249,9 +249,12 @@ async function main(): Promise<void> {
       active = base;
       liveState.setActive(base);
     }
+    const currentVisible = replay.getVisibleBars();
+    const preserveTime =
+      currentVisible.length > 0 ? currentVisible[currentVisible.length - 1].time : null;
     view = active === base || base === 0 ? bars : resample(bars, active, base);
     lastPanelKey = "";
-    replay.setData(view, overlayTrades, overlaySignals);
+    replay.setData(view, overlayTrades, overlaySignals, preserveTime);
     replayBar.setTrades(overlayTrades, view);
     chart.fit();
     const latestBar = view[view.length - 1];

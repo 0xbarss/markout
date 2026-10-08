@@ -74,11 +74,27 @@ export class ReplayController {
     this.setData(bars, trades, signals);
   }
 
-  public setData(bars: Bar[], trades: Trade[], signals: Signal[] = this.signals): void {
+  public setData(
+    bars: Bar[],
+    trades: Trade[],
+    signals: Signal[] = this.signals,
+    preserveTime: number | null = null,
+  ): void {
     this.bars = bars;
     this.trades = trades;
     this.signals = signals;
-    this.cursor = Math.max(0, bars.length - 1);
+    if (preserveTime === null || bars.length === 0) {
+      this.cursor = Math.max(0, bars.length - 1);
+    } else {
+      let idx = -1;
+      for (let i = bars.length - 1; i >= 0; i--) {
+        if (bars[i].time <= preserveTime) {
+          idx = i;
+          break;
+        }
+      }
+      this.cursor = idx >= 0 ? idx : 0;
+    }
     this.dataVersion++;
     this.emitState();
     this.emitFrame();
