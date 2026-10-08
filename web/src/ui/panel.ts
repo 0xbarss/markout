@@ -124,12 +124,12 @@ export function renderStats(s: Stats, trades: Trade[] = []): void {
   const maeTrades = closed.filter((t) => t.mae_pct !== null && !isNaN(t.mae_pct));
   if (maeTrades.length > 0) {
     const avgMae = maeTrades.reduce((acc, t) => acc + (t.mae_pct as number), 0) / maeTrades.length;
-    avgMaeStr = `${avgMae >= 0 ? "+" : ""}${fmt(avgMae, 2)}%`;
+    avgMaeStr = `${fmtSigned(avgMae, 2)}%`;
   }
   const mfeTrades = closed.filter((t) => t.mfe_pct !== null && !isNaN(t.mfe_pct));
   if (mfeTrades.length > 0) {
     const avgMfe = mfeTrades.reduce((acc, t) => acc + (t.mfe_pct as number), 0) / mfeTrades.length;
-    avgMfeStr = `+${fmt(avgMfe, 2)}%`;
+    avgMfeStr = `${fmtSigned(avgMfe, 2)}%`;
   }
 
   // Rows for DL list

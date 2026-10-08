@@ -427,7 +427,7 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
         if (exitTime !== null) {
           const ei = locate(currentBars, ft.entry_time);
           const xi = locate(currentBars, exitTime);
-          if (ei >= 0 && xi >= 0) {
+          if (ei >= 0 && xi >= 0 && ei !== xi) {
             tradeConnector.applyOptions({
               color: ft.pnl >= 0 ? hexToRgba(UP, 0.7) : hexToRgba(DOWN, 0.7),
             });

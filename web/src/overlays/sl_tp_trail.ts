@@ -12,9 +12,11 @@ export function spanOf(t: Trade, bars: Bar[]): [number, number] | null {
   const n = bars.length;
   if (n === 0 || t.entry_time > bars[n - 1].time + (n > 1 ? bars[n - 1].time - bars[n - 2].time : 0)) return null;
   if (t.exit_time !== null && t.exit_time < bars[0].time) return null;
+  if (t.exit_time !== null && t.exit_time < t.entry_time) return null;
   const s = Math.max(0, barIndexAt(bars, t.entry_time));
   const e = t.exit_time === null ? n - 1 : Math.min(n - 1, barIndexAt(bars, t.exit_time));
-  return e > s ? [s, e] : null;
+  if (e > s) return [s, e];
+  return [s, Math.min(n - 1, s + 1)];
 }
 
 function slSegment(t: Trade, bars: Bar[], s: number, e: number): Segment {
@@ -54,7 +56,10 @@ export function buildTrail(trades: Trade[], bars: Bar[]): Trail {
     if (!span) continue;
     const [s, e] = span;
     sl.push(slSegment(t, bars, s, e));
-    if (t.take_profit !== null) tp.push({ start: s, end: e, pts: [[s, t.take_profit], [e, t.take_profit]] });
+    if (t.take_profit !== null) {
+      const pts: [number, number][] = s === e ? [[s, t.take_profit]] : [[s, t.take_profit], [e, t.take_profit]];
+      tp.push({ start: s, end: e, pts });
+    }
   }
   return { sl: toLanes(sl, bars), tp: toLanes(tp, bars) };
 }

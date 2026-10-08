@@ -96,7 +96,7 @@ async function main(): Promise<void> {
     rEl.textContent = t.exit_time !== null ? `${fmtSigned(t.r_multiple, 2)} R` : "—";
     rEl.className = `trade-card-val ${signClass(t.r_multiple)}`;
     const mae = t.mae_pct !== null && !isNaN(t.mae_pct) ? `${fmtSigned(t.mae_pct, 2)}%` : "—";
-    const mfe = t.mfe_pct !== null && !isNaN(t.mfe_pct) ? `+${fmtPrice(t.mfe_pct)}%` : "—";
+    const mfe = t.mfe_pct !== null && !isNaN(t.mfe_pct) ? `${fmtSigned(t.mfe_pct, 2)}%` : "—";
     $("tc-mae-mfe").textContent = `${mae} / ${mfe}`;
     const trailCount = t.sl_history.length;
     const reasonText = t.exit_reason ? t.exit_reason.replace(/_/g, " ") : (t.exit_time ? "exit" : "open");

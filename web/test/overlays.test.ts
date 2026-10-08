@@ -82,12 +82,31 @@ test("trail: back-to-back trades (exit bar + 1 == next entry bar) do not share a
   assert.equal(buildTrail([a, b], bars).sl.length, 2);
 });
 
-test("spanOf: open trades run to the last bar; same-bar and out-of-range trades are skipped", () => {
+test("spanOf: open trades, same-bar trades, and out-of-range boundaries", () => {
   assert.deepEqual(spanOf(trade({ exit_time: null }), bars), [2, 19]);
-  assert.equal(spanOf(trade({ entry_time: at(3), exit_time: at(3, 100) }), bars), null);
+  assert.deepEqual(spanOf(trade({ entry_time: at(3), exit_time: at(3, 100) }), bars), [3, 4]);
+  assert.deepEqual(spanOf(trade({ entry_time: at(19), exit_time: null }), bars), [19, 19]);
+  assert.deepEqual(spanOf(trade({ entry_time: at(19), exit_time: at(19, 100) }), bars), [19, 19]);
   assert.equal(spanOf(trade({ entry_time: at(40), exit_time: null }), bars), null);
   assert.equal(spanOf(trade({ entry_time: at(0, -9000), exit_time: at(0, -1) }), bars), null);
   assert.deepEqual(spanOf(trade({ entry_time: at(0, -9000), exit_time: at(3) }), bars), [0, 3]);
+  assert.equal(spanOf(trade({ entry_time: at(5), exit_time: at(3) }), bars), null);
+});
+
+test("trail: same-bar trade yields an SL lane and TP lane", () => {
+  const sameBar = trade({ entry_time: at(3), exit_time: at(3, 100), take_profit: 105 });
+  const trail = buildTrail([sameBar], bars);
+  assert.equal(trail.sl.length, 1);
+  assert.equal(trail.tp.length, 1);
+  assert.equal(trail.sl[0].length, 2);
+  assert.equal(trail.tp[0].length, 2);
+
+  const lastBarTrade = trade({ entry_time: at(19), exit_time: at(19, 100), take_profit: 105 });
+  const lastTrail = buildTrail([lastBarTrade], bars);
+  assert.equal(lastTrail.sl.length, 1);
+  assert.equal(lastTrail.tp.length, 1);
+  assert.equal(lastTrail.sl[0].length, 1);
+  assert.equal(lastTrail.tp[0].length, 1);
 });
 
 test("resample aggregates OHLCV into buckets", () => {

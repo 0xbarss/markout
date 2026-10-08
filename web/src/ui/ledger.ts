@@ -1,5 +1,5 @@
 import { $, h } from "../dom";
-import { fmt, fmtDuration, fmtPrice, fmtSigned, signClass } from "../format";
+import { fmtDuration, fmtPrice, fmtSigned, signClass } from "../format";
 import type { Signal, Trade } from "../types";
 
 export interface ColumnDef {
@@ -78,7 +78,7 @@ function row(t: Trade): HTMLTableRowElement {
   const maeCell = h("td", `col-right ${t.mae_pct !== null && t.mae_pct !== 0 ? "down" : ""}`, maeVal);
 
   // MFE
-  const mfeVal = t.mfe_pct !== null && !isNaN(t.mfe_pct) ? `+${fmt(t.mfe_pct, 2)}%` : "—";
+  const mfeVal = t.mfe_pct !== null && !isNaN(t.mfe_pct) ? `${fmtSigned(t.mfe_pct, 2)}%` : "—";
   const mfeCell = h("td", `col-right ${t.mfe_pct !== null && t.mfe_pct > 0 ? "up" : ""}`, mfeVal);
 
   // Duration
