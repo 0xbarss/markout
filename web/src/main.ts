@@ -26,7 +26,7 @@ import { mountLedger } from "./ui/ledger.ts";
 import { renderStats } from "./ui/panel.ts";
 import type { Bar, MarketEvent, Trade } from "./types.ts";
 
-function renderLegend(o: Ohlc | null, fallback: Bar | undefined): void {
+function renderLegend(o: Ohlc | null, fallback: Bar | undefined, notice?: string | null): void {
   const src = o ?? fallback;
   const legend = $("legend");
   legend.replaceChildren();
@@ -37,6 +37,9 @@ function renderLegend(o: Ohlc | null, fallback: Bar | undefined): void {
     legend.append(h("span", cls, `${k} ${fmtPrice(v)}`));
   }
   legend.append(h("span", cls, `${fmtSigned(pct)}%`));
+  if (notice) {
+    legend.append(h("span", "muted", notice));
+  }
 }
 
 /** The symbol with the most trades; the bars are assumed to belong to it. */
@@ -240,7 +243,7 @@ async function main(): Promise<void> {
     renderTicker(frame.visibleBars);
     const latestBar = frame.visibleBars[frame.visibleBars.length - 1];
     setBarCountdownContext(latestBar ? latestBar.time : null, liveState.getActive(), health.mode === "live");
-    renderLegend(null, latestBar);
+    renderLegend(null, latestBar, chart.getOverlayNotice());
   });
   const apply = () => {
     const base = liveState.getBase();
@@ -267,9 +270,16 @@ async function main(): Promise<void> {
     });
   };
 
+  let lastCrosshairOhlc: Ohlc | null = null;
   chart.onCrosshair((o) => {
+    lastCrosshairOhlc = o;
     const visible = replay.getVisibleBars();
-    renderLegend(o, visible[visible.length - 1]);
+    renderLegend(o, visible[visible.length - 1], chart.getOverlayNotice());
+  });
+
+  chart.onOverlayNoticeChange((notice) => {
+    const visible = replay.getVisibleBars();
+    renderLegend(lastCrosshairOhlc, visible[visible.length - 1], notice);
   });
 
   $("empty").hidden = bars.length > 0;

@@ -8,16 +8,21 @@ import { precisionFor } from "./format";
 import { buildMarkers } from "./overlays/markers";
 import { buildSignalMarkers } from "./overlays/signals";
 import { barIndexAt, locate } from "./overlays/snap.ts";
-import { buildTrail, type TrailPoint } from "./overlays/sl_tp_trail";
+import { buildTrail, syncLanes, type TrailPoint } from "./overlays/sl_tp_trail";
 import type { Bar, Signal, Trade } from "./types";
 import { DrawingFloatingToolbar } from "./ui/drawing_toolbar.ts";
-
 
 import { getThemeTokens, hexToRgba } from "./theme.ts";
 
 export interface Ohlc { open: number; high: number; low: number; close: number; }
 
 export type TradeOverlayMode = "focus" | "all" | "off";
+
+/** Maximum number of open trades to render trailing stop/target overlay lanes for in focus mode. */
+export const MAX_FOCUS_OPEN_TRADES = 20;
+
+/** Maximum number of overlay lanes (series) to create in "all" mode to prevent performance degradation. */
+export const MAX_ALL_LANES = 200;
 
 export interface TerminalChart {
   setBars(bars: Bar[], fit?: boolean): void;
@@ -39,6 +44,8 @@ export interface TerminalChart {
   setAutoScale(auto: boolean): void;
   isAutoScale(): boolean;
   onAutoScaleChange(cb: (auto: boolean) => void): () => void;
+  getOverlayNotice(): string | null;
+  onOverlayNoticeChange(cb: (notice: string | null) => void): () => void;
 }
 
 export function createTerminalChart(container: HTMLElement): TerminalChart {
@@ -91,8 +98,7 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       ? { time: p.time as UTCTimestamp }
       : { time: p.time as UTCTimestamp, value: p.value });
   const sync = (pool: ISeriesApi<"Line">[], lanes: TrailPoint[][], make: () => ISeriesApi<"Line">) => {
-    while (pool.length < lanes.length) pool.push(make());
-    pool.forEach((series, i) => series.setData(toData(lanes[i] ?? [])));
+    syncLanes(pool, lanes, make, (s) => chart.removeSeries(s), toData);
   };
 
   const drawingCanvas = document.createElement("canvas");
@@ -227,9 +233,21 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
     }
   });
 
+  let currentOverlayNotice: string | null = null;
+  const overlayNoticeListeners = new Set<(notice: string | null) => void>();
+  const setOverlayNotice = (notice: string | null) => {
+    if (notice !== currentOverlayNotice) {
+      currentOverlayNotice = notice;
+      for (const cb of overlayNoticeListeners) {
+        cb(currentOverlayNotice);
+      }
+    }
+  };
+
   chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
     drawings.render();
     floatingToolbar.updatePosition();
+    updateTradeOverlays();
     if (!isInitializing) {
       const opts = chart.priceScale("right").options();
       if (opts.autoScale !== undefined && opts.autoScale !== autoScale) {
@@ -262,6 +280,12 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       autoScaleListeners.add(cb);
       cb(autoScale);
       return () => autoScaleListeners.delete(cb);
+    },
+    getOverlayNotice: () => currentOverlayNotice,
+    onOverlayNoticeChange(cb: (notice: string | null) => void) {
+      overlayNoticeListeners.add(cb);
+      cb(currentOverlayNotice);
+      return () => overlayNoticeListeners.delete(cb);
     },
 
     setSymbol(symbol: string) {
@@ -455,31 +479,57 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       signalTpLine.setData([]);
       sync(slLanes, [], makeSl);
       sync(tpLanes, [], makeTp);
+      setOverlayNotice(null);
       return;
     }
 
     let tradeMarkers: ReturnType<typeof buildMarkers> = [];
+    const visibleRange = chart.timeScale().getVisibleLogicalRange();
 
     if (currentOverlayMode === "off") {
       tradeConnector.setData([]);
       sync(slLanes, [], makeSl);
       sync(tpLanes, [], makeTp);
+      setOverlayNotice(null);
     } else if (currentOverlayMode === "focus") {
       let focused: Trade[] = [];
+      let extraCount = 0;
+      const openTrades = lastTrades.filter((t) => t.exit_time === null);
       if (currentSelectedTradeId !== null) {
         const found = lastTrades.find((t) => t.id === currentSelectedTradeId);
-        if (found) focused = [found];
+        if (found) {
+          if (found.exit_time !== null) {
+            const recentOpen = openTrades.slice(-MAX_FOCUS_OPEN_TRADES);
+            focused = [found, ...recentOpen];
+            if (openTrades.length > MAX_FOCUS_OPEN_TRADES) {
+              extraCount = openTrades.length - MAX_FOCUS_OPEN_TRADES;
+            }
+          } else {
+            const otherOpen = openTrades.filter((t) => t.id !== found.id);
+            focused = [found, ...otherOpen.slice(-(MAX_FOCUS_OPEN_TRADES - 1))];
+            if (openTrades.length > MAX_FOCUS_OPEN_TRADES) {
+              extraCount = openTrades.length - MAX_FOCUS_OPEN_TRADES;
+            }
+          }
+        }
       }
       if (focused.length === 0) {
-        focused = lastTrades.filter((t) => t.exit_time === null);
+        if (openTrades.length > MAX_FOCUS_OPEN_TRADES) {
+          focused = openTrades.slice(-MAX_FOCUS_OPEN_TRADES);
+          extraCount = openTrades.length - MAX_FOCUS_OPEN_TRADES;
+        } else {
+          focused = openTrades;
+        }
       }
 
+      setOverlayNotice(extraCount > 0 ? `+${extraCount.toLocaleString()} more open` : null);
+
       tradeMarkers = buildMarkers(focused, currentBars, false, currentSelectedTradeId);
-      const trail = buildTrail(focused, currentBars);
+      const trail = buildTrail(focused, currentBars, undefined, visibleRange);
       sync(slLanes, trail.sl, makeSl);
       sync(tpLanes, trail.tp, makeTp);
 
-      if (focused.length === 1 && focused[0].exit_time !== null) {
+      if (focused.length >= 1 && focused[0].id === currentSelectedTradeId && focused[0].exit_time !== null) {
         const ft = focused[0];
         const exitTime = ft.exit_time;
         if (exitTime !== null) {
@@ -506,9 +556,14 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
       // "all" mode
       tradeConnector.setData([]);
       tradeMarkers = buildMarkers(lastTrades, currentBars, true, currentSelectedTradeId);
-      const trail = buildTrail(lastTrades, currentBars);
+      const trail = buildTrail(lastTrades, currentBars, MAX_ALL_LANES, visibleRange);
       sync(slLanes, trail.sl, makeSl);
       sync(tpLanes, trail.tp, makeTp);
+      setOverlayNotice(
+        trail.capped
+          ? `+${(trail.cappedCount ?? 0).toLocaleString()} trails hidden (max ${MAX_ALL_LANES} lanes)`
+          : null,
+      );
     }
 
     // Signals markers

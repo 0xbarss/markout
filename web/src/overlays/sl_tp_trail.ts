@@ -3,7 +3,12 @@ import type { Bar, Trade } from "../types";
 
 /** A line point; a point without `value` is a gap that breaks the line. */
 export interface TrailPoint { time: number; value?: number; }
-export interface Trail { sl: TrailPoint[][]; tp: TrailPoint[][]; }
+export interface Trail {
+  sl: TrailPoint[][];
+  tp: TrailPoint[][];
+  capped?: boolean;
+  cappedCount?: number;
+}
 
 interface Segment { start: number; end: number; pts: [number, number][]; } // [barIndex, price]
 
@@ -33,33 +38,74 @@ function slSegment(t: Trade, bars: Bar[], s: number, e: number): Segment {
 }
 
 /** Greedily pack segments into lanes of non-overlapping segments (one chart series per lane). */
-function toLanes(segs: Segment[], bars: Bar[]): TrailPoint[][] {
+function toLanes(
+  segs: Segment[],
+  bars: Bar[],
+  maxLanes?: number,
+): { lanes: TrailPoint[][]; cappedCount: number } {
   segs.sort((a, b) => a.start - b.start);
   const ends: number[] = [];
   const lanes: TrailPoint[][] = [];
+  let cappedCount = 0;
   for (const seg of segs) {
     // Need one spare bar between segments to hold the gap point.
     let k = ends.findIndex((end) => end + 2 <= seg.start);
-    if (k < 0) { k = ends.length; ends.push(-2); lanes.push([]); }
+    if (k < 0) {
+      if (maxLanes !== undefined && ends.length >= maxLanes) {
+        cappedCount++;
+        continue;
+      }
+      k = ends.length;
+      ends.push(-2);
+      lanes.push([]);
+    }
     if (lanes[k].length > 0) lanes[k].push({ time: bars[ends[k] + 1].time });
     for (const [i, v] of seg.pts) lanes[k].push({ time: bars[i].time, value: v });
     ends[k] = seg.end;
   }
-  return lanes;
+  return { lanes, cappedCount };
 }
 
 /** Step-wise trailing stop paths and take-profit levels, packed into series lanes. */
-export function buildTrail(trades: Trade[], bars: Bar[]): Trail {
+export function buildTrail(
+  trades: Trade[],
+  bars: Bar[],
+  maxLanes?: number,
+  visibleRange?: { from: number; to: number } | null,
+): Trail {
   const sl: Segment[] = [], tp: Segment[] = [];
   for (const t of trades) {
     const span = spanOf(t, bars);
     if (!span) continue;
     const [s, e] = span;
+    if (visibleRange && (e < visibleRange.from || s > visibleRange.to)) {
+      continue;
+    }
     sl.push(slSegment(t, bars, s, e));
     if (t.take_profit !== null) {
       const pts: [number, number][] = s === e ? [[s, t.take_profit]] : [[s, t.take_profit], [e, t.take_profit]];
       tp.push({ start: s, end: e, pts });
     }
   }
-  return { sl: toLanes(sl, bars), tp: toLanes(tp, bars) };
+  const slRes = toLanes(sl, bars, maxLanes);
+  const tpRes = toLanes(tp, bars, maxLanes);
+  const capped = slRes.cappedCount > 0 || tpRes.cappedCount > 0;
+  const cappedCount = Math.max(slRes.cappedCount, tpRes.cappedCount);
+  return { sl: slRes.lanes, tp: tpRes.lanes, capped, cappedCount };
+}
+
+/** Synchronizes series pool with lane data, dynamically trimming spare series beyond headroom of 8. */
+export function syncLanes<T extends { setData(data: any): void }>(
+  pool: T[],
+  lanes: TrailPoint[][],
+  make: () => T,
+  remove: (series: T) => void,
+  toData: (lane: TrailPoint[]) => any[],
+): void {
+  while (pool.length < lanes.length) pool.push(make());
+  while (pool.length > lanes.length + 8) {
+    const s = pool.pop();
+    if (s) remove(s);
+  }
+  pool.forEach((series, i) => series.setData(toData(lanes[i] ?? [])));
 }

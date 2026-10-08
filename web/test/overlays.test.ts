@@ -4,7 +4,7 @@ import test from "node:test";
 import { buildMarkers } from "../src/overlays/markers.ts";
 import { buildSignalMarkers } from "../src/overlays/signals.ts";
 import { barIndexAt, locate } from "../src/overlays/snap.ts";
-import { buildTrail, spanOf } from "../src/overlays/sl_tp_trail.ts";
+import { buildTrail, spanOf, syncLanes } from "../src/overlays/sl_tp_trail.ts";
 import {
   baseInterval,
   bucketTime,
@@ -251,3 +251,64 @@ test("strategy signals: visual markers for buy and sell, omit hold", () => {
   assert.equal(markers[1].shape, "arrowDown");
   assert.ok((markers[1].text as string).includes("Eclipse Sell @ 103.00"));
 });
+
+test("trail: buildTrail with 1,000 overlapping open trades respects cap parameter", () => {
+  const openTrades: Trade[] = Array.from({ length: 1000 }, (_, i) => trade({
+    id: i + 100,
+    entry_time: at(Math.min(18, i % 18)),
+    exit_time: null,
+    initial_sl: 95,
+    take_profit: 110,
+  }));
+  const trailUncapped = buildTrail(openTrades, bars);
+  assert.ok(trailUncapped.sl.length > 20);
+
+  const trailCapped = buildTrail(openTrades, bars, 20);
+  assert.equal(trailCapped.sl.length, 20);
+  assert.equal(trailCapped.tp.length, 20);
+  assert.equal(trailCapped.capped, true);
+  assert.ok((trailCapped.cappedCount ?? 0) > 0);
+});
+
+test("trail: buildTrail skips segments entirely outside visibleLogicalRange", () => {
+  const earlyTrade = trade({ id: 1, entry_time: at(1), exit_time: at(4) });
+  const midTrade = trade({ id: 2, entry_time: at(8), exit_time: at(12) });
+  const lateTrade = trade({ id: 3, entry_time: at(15), exit_time: at(18) });
+
+  // Visible range covers bars 7 to 13
+  const trail = buildTrail([earlyTrade, midTrade, lateTrade], bars, undefined, { from: 7, to: 13 });
+  assert.equal(trail.sl.length, 1);
+  assert.equal(trail.sl[0][0].time, at(8));
+});
+
+test("trail: syncLanes manages pool and trims spare series beyond headroom of 8", () => {
+  let createdCount = 0;
+  let removedCount = 0;
+  interface MockSeries {
+    id: number;
+    setData(data: any): void;
+  }
+  const pool: MockSeries[] = [];
+  const makeSeries = () => {
+    createdCount++;
+    return { id: createdCount, setData: () => {} };
+  };
+  const removeSeries = (_s: MockSeries) => {
+    removedCount++;
+  };
+  const dummyToData = (lane: any[]) => lane;
+
+  // Simulate 30 lanes
+  const lanes30 = Array.from({ length: 30 }, () => [{ time: at(1), value: 100 }]);
+  syncLanes(pool, lanes30, makeSeries, removeSeries, dummyToData);
+  assert.equal(pool.length, 30);
+  assert.equal(createdCount, 30);
+  assert.equal(removedCount, 0);
+
+  // Now mode switched to "off" or empty (0 lanes)
+  syncLanes(pool, [], makeSeries, removeSeries, dummyToData);
+  // Headroom is 8: pool should shrink from 30 down to 8
+  assert.equal(pool.length, 8);
+  assert.equal(removedCount, 22);
+});
+
