@@ -1,4 +1,8 @@
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use axum::{
     extract::{
@@ -23,7 +27,7 @@ use crate::{
     config::{Config, Mode},
     event_bus::{EventBus, MarketEvent},
     ingestion::Dataset,
-    models::{Bar, Signal, Trade},
+    models::{Bar, Signal, StopPoint, Trade},
     stats::{self, Stats},
 };
 
@@ -32,12 +36,136 @@ use crate::{
 #[folder = "web/dist/"]
 struct Assets;
 
+/// In-memory snapshot for live mode to serve late joiners and page refreshes.
+#[derive(Debug, Clone)]
+pub struct LiveSnapshot {
+    pub bars: VecDeque<Bar>,
+    pub trades: HashMap<u64, Trade>,
+    pub signals: Vec<Signal>,
+    pub symbol: Option<String>,
+    pub cap: usize,
+}
+
+impl LiveSnapshot {
+    pub fn new(cap: usize) -> Self {
+        Self {
+            bars: VecDeque::new(),
+            trades: HashMap::new(),
+            signals: Vec::new(),
+            symbol: None,
+            cap: cap.max(1),
+        }
+    }
+
+    pub fn apply(&mut self, ev: MarketEvent) {
+        match ev {
+            MarketEvent::Bar(b) => {
+                if let Some(last) = self.bars.back_mut() {
+                    if last.time == b.time {
+                        *last = b;
+                    } else if b.time > last.time {
+                        self.bars.push_back(b);
+                    } else if let Some(existing) = self.bars.iter_mut().find(|x| x.time == b.time) {
+                        *existing = b;
+                    } else {
+                        let idx = self
+                            .bars
+                            .iter()
+                            .position(|x| x.time > b.time)
+                            .unwrap_or(self.bars.len());
+                        self.bars.insert(idx, b);
+                    }
+                } else {
+                    self.bars.push_back(b);
+                }
+                while self.bars.len() > self.cap {
+                    self.bars.pop_front();
+                }
+            }
+            MarketEvent::Trade(u) => {
+                if self.symbol.is_none() && !u.trade.symbol.is_empty() {
+                    self.symbol = Some(u.trade.symbol.clone());
+                }
+                self.trades.insert(u.trade.id, u.trade);
+            }
+            MarketEvent::RiskBracket {
+                trade_id,
+                stop_loss,
+                take_profit,
+                timestamp,
+            } => {
+                if let Some(trade) = self.trades.get_mut(&trade_id) {
+                    if take_profit.is_some() {
+                        trade.take_profit = take_profit;
+                    }
+                    if let Some(sl) = stop_loss {
+                        if let Some(last) = trade.sl_history.last_mut() {
+                            if last.time == timestamp {
+                                last.price = sl;
+                            } else {
+                                trade.sl_history.push(StopPoint {
+                                    time: timestamp,
+                                    price: sl,
+                                });
+                            }
+                        } else {
+                            trade.sl_history.push(StopPoint {
+                                time: timestamp,
+                                price: sl,
+                            });
+                        }
+                    }
+                }
+            }
+            MarketEvent::Signal(s) => {
+                if self.symbol.is_none() {
+                    if let Some(sym) = &s.symbol {
+                        if !sym.is_empty() {
+                            self.symbol = Some(sym.clone());
+                        }
+                    }
+                }
+                if let Some(existing) = self.signals.iter_mut().find(|x| x.id == s.id) {
+                    *existing = s;
+                } else {
+                    self.signals.push(s);
+                }
+            }
+            MarketEvent::Tick(t) => {
+                if self.symbol.is_none() && !t.symbol.is_empty() {
+                    self.symbol = Some(t.symbol);
+                }
+            }
+            MarketEvent::Account(_) => {}
+        }
+    }
+
+    pub fn bars(&self) -> Vec<Bar> {
+        self.bars.iter().cloned().collect()
+    }
+
+    pub fn trades(&self) -> Vec<Trade> {
+        let mut res: Vec<Trade> = self.trades.values().cloned().collect();
+        res.sort_by_key(|t| (t.entry_time, t.id));
+        res
+    }
+
+    pub fn signals(&self) -> Vec<Signal> {
+        self.signals.clone()
+    }
+
+    pub fn stats(&self) -> Stats {
+        stats::compute(&self.trades())
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub bus: EventBus,
     pub mode: &'static str,
     pub tf: Option<u64>,
     pub data: Arc<Dataset>,
+    pub live_store: Option<Arc<tokio::sync::RwLock<LiveSnapshot>>>,
     pub host: String,
     pub allowed_hosts: Arc<HashSet<String>>,
     pub allowed_origins: Arc<Vec<String>>,
@@ -149,11 +277,57 @@ pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result
         _ => None,
     };
 
+    let live_store = match &config.mode {
+        Mode::Live { feed, symbol, .. } => {
+            if let Some(f) = feed {
+                tracing::warn!(
+                    "--feed `{}` is not implemented; events must be published to WebSocket or bus",
+                    f
+                );
+            }
+            let mut snapshot = LiveSnapshot::new(50_000);
+            if let Some(s) = symbol {
+                snapshot.symbol = Some(s.clone());
+            }
+            for b in &data.bars {
+                snapshot.apply(MarketEvent::Bar(*b));
+            }
+            for t in &data.trades {
+                snapshot.apply(MarketEvent::Trade(crate::models::TradeUpdate {
+                    kind: crate::models::TradeUpdateKind::Entry,
+                    trade: t.clone(),
+                }));
+            }
+            for s in &data.signals {
+                snapshot.apply(MarketEvent::Signal(s.clone()));
+            }
+            let store = Arc::new(tokio::sync::RwLock::new(snapshot));
+            let store_clone = store.clone();
+            let mut rx = bus.subscribe();
+            tokio::spawn(async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(ev) => {
+                            store_clone.write().await.apply(ev);
+                        }
+                        Err(RecvError::Lagged(n)) => {
+                            tracing::warn!("live snapshot lagged, skipped {n} events");
+                        }
+                        Err(RecvError::Closed) => break,
+                    }
+                }
+            });
+            Some(store)
+        }
+        _ => None,
+    };
+
     let state = AppState {
         bus,
         mode: config.mode.name(),
         tf,
         data: Arc::new(data),
+        live_store,
         host: config.host.clone(),
         allowed_hosts: Arc::new(allowed_hosts),
         allowed_origins: Arc::new(config.allow_origins),
@@ -180,23 +354,44 @@ async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
     if let Some(tf) = state.tf {
         payload["tf"] = json!(tf);
     }
+    if let Some(store) = &state.live_store {
+        if let Some(sym) = &store.read().await.symbol {
+            payload["symbol"] = json!(sym);
+        }
+    }
     Json(payload)
 }
 
 async fn get_bars(State(state): State<AppState>) -> Json<Vec<Bar>> {
-    Json(state.data.bars.clone())
+    if let Some(store) = &state.live_store {
+        Json(store.read().await.bars())
+    } else {
+        Json(state.data.bars.clone())
+    }
 }
 
 async fn get_trades(State(state): State<AppState>) -> Json<Vec<Trade>> {
-    Json(state.data.trades.clone())
+    if let Some(store) = &state.live_store {
+        Json(store.read().await.trades())
+    } else {
+        Json(state.data.trades.clone())
+    }
 }
 
 async fn get_signals(State(state): State<AppState>) -> Json<Vec<Signal>> {
-    Json(state.data.signals.clone())
+    if let Some(store) = &state.live_store {
+        Json(store.read().await.signals())
+    } else {
+        Json(state.data.signals.clone())
+    }
 }
 
 async fn get_stats(State(state): State<AppState>) -> Json<Stats> {
-    Json(stats::compute(&state.data.trades))
+    if let Some(store) = &state.live_store {
+        Json(store.read().await.stats())
+    } else {
+        Json(stats::compute(&state.data.trades))
+    }
 }
 
 fn origin_allowed(h: &HeaderMap, extra: &[String]) -> bool {
@@ -341,6 +536,7 @@ mod tests {
             mode: "offline",
             tf: None,
             data: Arc::new(data),
+            live_store: None,
             host: "127.0.0.1".into(),
             allowed_hosts: Arc::new(allowed_hosts.iter().map(|s| s.to_string()).collect()),
             allowed_origins: Arc::new(allowed_origins.iter().map(|s| s.to_string()).collect()),
@@ -380,6 +576,7 @@ mod tests {
             mode: "live",
             tf: Some(900),
             data: Arc::new(Dataset::default()),
+            live_store: None,
             host: "127.0.0.1".into(),
             allowed_hosts: Arc::new(HashSet::new()),
             allowed_origins: Arc::new(Vec::new()),
@@ -780,5 +977,285 @@ mod tests {
 
         let err = resolve_host("invalid-host-name-markout-does-not-exist.test", 8080).await;
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn live_snapshot_bars_replace_and_evict() {
+        let mut snapshot = LiveSnapshot::new(2);
+        let b1 = Bar {
+            time: 100,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: 10.0,
+        };
+        let b2 = Bar {
+            time: 200,
+            open: 1.5,
+            high: 2.5,
+            low: 1.0,
+            close: 2.0,
+            volume: 20.0,
+        };
+        snapshot.apply(MarketEvent::Bar(b1));
+        snapshot.apply(MarketEvent::Bar(b2));
+        assert_eq!(snapshot.bars().len(), 2);
+        assert_eq!(snapshot.bars()[0].time, 100);
+
+        // Replace bar with same timestamp
+        let b2_updated = Bar {
+            time: 200,
+            open: 1.5,
+            high: 3.0,
+            low: 1.0,
+            close: 2.8,
+            volume: 25.0,
+        };
+        snapshot.apply(MarketEvent::Bar(b2_updated));
+        assert_eq!(snapshot.bars().len(), 2);
+        assert_eq!(snapshot.bars()[1].close, 2.8);
+
+        // Capacity eviction: adding 3rd bar drops the 1st bar (time 100)
+        let b3 = Bar {
+            time: 300,
+            open: 2.8,
+            high: 3.5,
+            low: 2.5,
+            close: 3.0,
+            volume: 15.0,
+        };
+        snapshot.apply(MarketEvent::Bar(b3));
+        let bars = snapshot.bars();
+        assert_eq!(bars.len(), 2);
+        assert_eq!(bars[0].time, 200);
+        assert_eq!(bars[1].time, 300);
+    }
+
+    #[test]
+    fn live_snapshot_trades_and_risk_bracket() {
+        use crate::models::{TradeSide, TradeUpdate, TradeUpdateKind};
+        let mut snapshot = LiveSnapshot::new(100);
+        let trade = Trade {
+            id: 42,
+            symbol: "BTCUSDT".into(),
+            direction: TradeSide::Buy,
+            size: 1.0,
+            entry_time: 1_700_000_000,
+            entry_price: 50_000.0,
+            exit_time: None,
+            exit_price: None,
+            exit_reason: None,
+            initial_sl: 49_000.0,
+            take_profit: Some(52_000.0),
+            sl_history: vec![],
+            pnl: 0.0,
+            r_multiple: 0.0,
+            fee: 1.5,
+            mae_pct: None,
+            mfe_pct: None,
+        };
+        snapshot.apply(MarketEvent::Trade(TradeUpdate {
+            kind: TradeUpdateKind::Entry,
+            trade,
+        }));
+        assert_eq!(snapshot.trades().len(), 1);
+        assert_eq!(snapshot.symbol.as_deref(), Some("BTCUSDT"));
+
+        // Apply risk bracket update
+        snapshot.apply(MarketEvent::RiskBracket {
+            trade_id: 42,
+            stop_loss: Some(49_500.0),
+            take_profit: Some(53_000.0),
+            timestamp: 1_700_000_100,
+        });
+        let trades = snapshot.trades();
+        assert_eq!(trades[0].take_profit, Some(53_000.0));
+        assert_eq!(trades[0].sl_history.len(), 1);
+        assert_eq!(trades[0].sl_history[0].price, 49_500.0);
+
+        // Same timestamp update modifies price instead of appending
+        snapshot.apply(MarketEvent::RiskBracket {
+            trade_id: 42,
+            stop_loss: Some(49_600.0),
+            take_profit: None,
+            timestamp: 1_700_000_100,
+        });
+        let trades = snapshot.trades();
+        assert_eq!(trades[0].sl_history.len(), 1);
+        assert_eq!(trades[0].sl_history[0].price, 49_600.0);
+
+        // Different timestamp appends to history
+        snapshot.apply(MarketEvent::RiskBracket {
+            trade_id: 42,
+            stop_loss: Some(49_800.0),
+            take_profit: None,
+            timestamp: 1_700_000_200,
+        });
+        let trades = snapshot.trades();
+        assert_eq!(trades[0].sl_history.len(), 2);
+        assert_eq!(trades[0].sl_history[1].price, 49_800.0);
+    }
+
+    #[tokio::test]
+    async fn live_endpoints_serve_late_joiners_from_snapshot() {
+        use crate::models::{Direction, TradeSide, TradeUpdate, TradeUpdateKind};
+
+        let bus = EventBus::default();
+        let snapshot = LiveSnapshot::new(50_000);
+        let store = Arc::new(tokio::sync::RwLock::new(snapshot));
+        let store_clone = store.clone();
+        let mut rx = bus.subscribe();
+
+        tokio::spawn(async move {
+            while let Ok(ev) = rx.recv().await {
+                store_clone.write().await.apply(ev);
+            }
+        });
+
+        let state = AppState {
+            bus: bus.clone(),
+            mode: "live",
+            tf: Some(60),
+            data: Arc::new(Dataset::default()),
+            live_store: Some(store),
+            host: "127.0.0.1".into(),
+            allowed_hosts: Arc::new(HashSet::new()),
+            allowed_origins: Arc::new(Vec::new()),
+            allow_ws_publish: false,
+        };
+        let app = router(state);
+
+        // Publish 3 bars
+        for i in 1..=3 {
+            bus.publish(MarketEvent::Bar(Bar {
+                time: i * 60,
+                open: 100.0 + i as f64,
+                high: 105.0 + i as f64,
+                low: 99.0 + i as f64,
+                close: 103.0 + i as f64,
+                volume: 50.0,
+            }));
+        }
+
+        // Publish 1 trade
+        bus.publish(MarketEvent::Trade(TradeUpdate {
+            kind: TradeUpdateKind::Entry,
+            trade: Trade {
+                id: 10,
+                symbol: "ETHUSDT".into(),
+                direction: TradeSide::Buy,
+                size: 2.0,
+                entry_time: 60,
+                entry_price: 3000.0,
+                exit_time: None,
+                exit_price: None,
+                exit_reason: None,
+                initial_sl: 2900.0,
+                take_profit: Some(3200.0),
+                sl_history: vec![],
+                pnl: 0.0,
+                r_multiple: 0.0,
+                fee: 2.0,
+                mae_pct: None,
+                mfe_pct: None,
+            },
+        }));
+
+        // Publish 1 signal
+        bus.publish(MarketEvent::Signal(Signal {
+            id: "sig_live_1".into(),
+            time: 60,
+            symbol: Some("ETHUSDT".into()),
+            direction: Direction::Buy,
+            entry_price: 3000.0,
+            stop_loss: 2900.0,
+            take_profit: 3200.0,
+            strategy: Some("TrendFollower".into()),
+            comment: None,
+        }));
+
+        // Yield to allow background task to process events
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Verify GET /api/v1/bars
+        let res_bars = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/bars")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_bars.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res_bars.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let bars: Vec<Bar> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(bars.len(), 3);
+        assert_eq!(bars[0].time, 60);
+        assert_eq!(bars[2].time, 180);
+
+        // Verify GET /api/v1/trades
+        let res_trades = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/trades")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_trades.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res_trades.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let trades: Vec<Trade> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].id, 10);
+
+        // Verify GET /api/v1/signals
+        let res_signals = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/signals")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_signals.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res_signals.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let signals: Vec<Signal> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].id, "sig_live_1");
+
+        // Verify GET /api/v1/health has symbol and mode
+        let res_health = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/health")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_health.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res_health.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let health: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(health["mode"], "live");
+        assert_eq!(health["symbol"], "ETHUSDT");
     }
 }

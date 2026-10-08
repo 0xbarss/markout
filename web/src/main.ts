@@ -130,6 +130,9 @@ async function main(): Promise<void> {
   if (symbol === "—" && signals.length > 0 && signals[0].symbol) {
     symbol = signals[0].symbol;
   }
+  if (symbol === "—" && health.symbol) {
+    symbol = health.symbol;
+  }
   let overlayTrades = trades.filter((t) => t.symbol === symbol);
   let overlaySignals = signals.filter((s) => !s.symbol || s.symbol === symbol || symbol === "—");
   let view: Bar[] = bars;

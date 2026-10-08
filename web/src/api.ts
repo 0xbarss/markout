@@ -11,6 +11,7 @@ export interface Health {
   version: string;
   mode: string;
   tf?: number | null;
+  symbol?: string | null;
 }
 
 export function loadAll(): Promise<[Bar[], Trade[], Stats, Signal[], Health]> {
