@@ -205,24 +205,10 @@ impl Dataset {
             }
             _ => {}
         }
-        if ds.bars.is_empty() && bars.is_none() && trades.is_none() {
-            let default_bars = Path::new("examples/bars.csv");
-            let default_trades = Path::new("examples/trades.jsonl");
-            if default_bars.exists() {
-                ds.bars = ohlcv::load(default_bars).unwrap_or_default();
-            } else {
-                ds.bars = ohlcv::parse_csv(include_str!("../../examples/bars.csv").as_bytes())
-                    .unwrap_or_default();
-            }
-            if ds.trades.is_empty() {
-                if default_trades.exists() {
-                    ds.trades = load_trades(default_trades).unwrap_or_default();
-                } else {
-                    ds.trades =
-                        json::parse_jsonl(include_str!("../../examples/trades.jsonl").as_bytes())
-                            .unwrap_or_default();
-                }
-            }
+        if bars.is_none() && trades.is_none() && strategy.is_none() {
+            tracing::info!("no input files given; loading bundled demo data");
+            ds.bars = ohlcv::parse_csv(include_str!("../../examples/bars.csv").as_bytes())?;
+            ds.trades = json::parse_jsonl(include_str!("../../examples/trades.jsonl").as_bytes())?;
         }
         Ok(ds)
     }
@@ -235,5 +221,37 @@ pub fn load_trades(path: &Path) -> Result<Vec<Trade>> {
         json::load_trades(path)
     } else {
         sqlite::load_trades(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn dataset_load_defaults_to_bundled_demo_when_no_inputs() {
+        let ds = Dataset::load(None, None, None).expect("bundled data must load cleanly");
+        assert!(!ds.bars.is_empty());
+        assert!(!ds.trades.is_empty());
+        assert!(ds.signals.is_empty());
+    }
+
+    #[test]
+    fn dataset_load_with_strategy_only_leaves_bars_and_trades_empty() {
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".jsonl")
+            .tempfile()
+            .unwrap();
+        writeln!(
+            tmp,
+            r#"{{"id":"sig-001","time":1700000000,"direction":"buy","entry_price":100.0}}"#
+        )
+        .unwrap();
+
+        let ds = Dataset::load(None, None, Some(tmp.path())).expect("signals must load");
+        assert_eq!(ds.signals.len(), 1);
+        assert!(ds.bars.is_empty());
+        assert!(ds.trades.is_empty());
     }
 }
