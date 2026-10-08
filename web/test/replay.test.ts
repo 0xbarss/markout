@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipTradesForReplay } from "../src/replay/ghost.ts";
+import { clipTradesForReplay, panelModel } from "../src/replay/ghost.ts";
 import { ReplayController, SUPPORTED_SPEEDS } from "../src/replay/controller.ts";
 import type { Bar, Trade } from "../src/types.ts";
 
@@ -57,6 +57,11 @@ test("ghost mode: masks exit and filters stop points for open trades", () => {
   assert.equal(t.exit_time, null);
   assert.equal(t.exit_price, null);
   assert.equal(t.exit_reason, null);
+  assert.equal(t.pnl, 0);
+  assert.equal(t.r_multiple, 0);
+  assert.equal(t.fee, 0);
+  assert.equal(t.mae_pct, null);
+  assert.equal(t.mfe_pct, null);
   // sl_history should only include point at T0 + 3*STEP, not T0 + 5*STEP
   assert.equal(t.sl_history.length, 1);
   assert.equal(t.sl_history[0].time, T0 + 3 * STEP);
@@ -210,7 +215,7 @@ test("replay controller: live bar updates when scrubbed back preserve cursor", (
 });
 
 test("replay controller: trade updates and risk bracket movements", () => {
-  const bars = makeBars(6);
+  const bars = makeBars(7);
   const trade = makeTrade();
   const controller = new ReplayController(bars, [trade]);
 
@@ -229,5 +234,69 @@ test("replay controller: trade updates and risk bracket movements", () => {
   assert.equal(visibleTrades[0].pnl, 20);
 
   controller.destroy();
+});
+
+test("panelModel: computes hindsight-free model across replay positions", () => {
+  const bars = makeBars(10);
+  const trade1 = makeTrade({
+    id: 1,
+    entry_time: T0 + 2 * STEP,
+    exit_time: T0 + 5 * STEP,
+    pnl: 10,
+  });
+  const trade2 = makeTrade({
+    id: 2,
+    entry_time: T0 + 6 * STEP,
+    exit_time: T0 + 8 * STEP,
+    pnl: -4,
+  });
+  const trades = [trade1, trade2];
+
+  // At cursor = 1: before trade1 entry
+  const frameBeforeEntry = {
+    cursor: 1,
+    total: 10,
+    visibleBars: bars.slice(0, 2),
+    visibleTrades: clipTradesForReplay(trades, bars.slice(0, 2)),
+    visibleSignals: [],
+    isLive: false,
+  };
+  const model0 = panelModel(frameBeforeEntry);
+  assert.equal(model0.visibleTrades.length, 0);
+  assert.equal(model0.stats.closed_trades, 0);
+  assert.equal(model0.stats.net_pnl, 0);
+
+  // At cursor = 3: trade1 is open, trade2 not entered
+  const frameTrade1Open = {
+    cursor: 3,
+    total: 10,
+    visibleBars: bars.slice(0, 4),
+    visibleTrades: clipTradesForReplay(trades, bars.slice(0, 4)),
+    visibleSignals: [],
+    isLive: false,
+  };
+  const model1 = panelModel(frameTrade1Open);
+  assert.equal(model1.visibleTrades.length, 1);
+  assert.equal(model1.visibleTrades[0].exit_time, null);
+  assert.equal(model1.visibleTrades[0].pnl, 0);
+  assert.equal(model1.stats.open_trades, 1);
+  assert.equal(model1.stats.closed_trades, 0);
+  assert.equal(model1.stats.net_pnl, 0);
+
+  // At cursor = 5: trade1 closed at T0 + 5*STEP
+  const frameTrade1Closed = {
+    cursor: 5,
+    total: 10,
+    visibleBars: bars.slice(0, 6),
+    visibleTrades: clipTradesForReplay(trades, bars.slice(0, 6)),
+    visibleSignals: [],
+    isLive: false,
+  };
+  const model2 = panelModel(frameTrade1Closed);
+  assert.equal(model2.visibleTrades.length, 1);
+  assert.equal(model2.visibleTrades[0].exit_time, trade1.exit_time);
+  assert.equal(model2.stats.open_trades, 0);
+  assert.equal(model2.stats.closed_trades, 1);
+  assert.equal(model2.stats.net_pnl, 10);
 });
 

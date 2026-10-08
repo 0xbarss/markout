@@ -1,9 +1,11 @@
-import type { Bar, Trade } from "../types.ts";
+import type { Bar, Signal, Stats, Trade } from "../types.ts";
+import { computeStats } from "../stats.ts";
 
 /**
  * Filter and clip trades for ghost mode up to the current visible bars.
  * Trades entering after the current bar are omitted to eliminate hindsight bias.
- * Trades currently open have their exit concealed and stop history clipped.
+ * Trades currently open have their exit concealed, stop history clipped,
+ * and final outcome metrics masked.
  */
 export function clipTradesForReplay(trades: Trade[], visibleBars: Bar[]): Trade[] {
   if (visibleBars.length === 0) return [];
@@ -25,9 +27,37 @@ export function clipTradesForReplay(trades: Trade[], visibleBars: Bar[]): Trade[
         exit_price: null,
         exit_reason: null,
         sl_history: slHistory,
+        pnl: 0,
+        r_multiple: 0,
+        fee: 0,
+        mae_pct: null,
+        mfe_pct: null,
       });
     }
   }
 
   return out;
 }
+
+export interface ReplayFrameLike {
+  visibleBars: Bar[];
+  visibleTrades: Trade[];
+  visibleSignals: Signal[];
+  isLive?: boolean;
+}
+
+export interface PanelModel {
+  stats: Stats;
+  visibleTrades: Trade[];
+  visibleSignals: Signal[];
+}
+
+export function panelModel(frame: ReplayFrameLike): PanelModel {
+  const stats = computeStats(frame.visibleTrades);
+  return {
+    stats,
+    visibleTrades: frame.visibleTrades,
+    visibleSignals: frame.visibleSignals,
+  };
+}
+

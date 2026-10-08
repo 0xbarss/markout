@@ -102,7 +102,21 @@ async function main(): Promise<void> {
     $("tc-reason").textContent = trailCount > 0 ? `${reasonText} (${trailCount} stop moves)` : reasonText;
   }
 
+  let selectedTradeId: number | null = null;
+  const refreshSelectedTrade = (visibleTrades: Trade[]) => {
+    if (selectedTradeId === null) return;
+    const current = visibleTrades.find((t) => t.id === selectedTradeId);
+    if (!current) {
+      selectedTradeId = null;
+      chart.setSelectedTrade(null);
+      updateTradeCard(null);
+    } else {
+      updateTradeCard(current);
+    }
+  };
+
   $("tc-close")?.addEventListener("click", () => {
+    selectedTradeId = null;
     chart.setSelectedTrade(null);
     updateTradeCard(null);
   });
@@ -142,16 +156,21 @@ async function main(): Promise<void> {
     trades,
     (t) => {
       if (!t) {
+        selectedTradeId = null;
         chart.setSelectedTrade(null);
         updateTradeCard(null);
         return;
       }
+      selectedTradeId = t.id;
       chart.setSelectedTrade(t.id);
-      updateTradeCard(t);
+      const visibleT = replay.getVisibleTrades().find((x) => x.id === t.id) ?? t;
+      updateTradeCard(visibleT);
       const span = t.symbol === symbol ? spanOf(t, view) : null;
       if (!span) return;
       const pad = Math.max(20, Math.round((span[1] - span[0]) * 0.5));
-      chart.focus(span[0] - pad, span[1] + pad);
+      const cursor = replay.getCursor();
+      const maxBar = Math.min(span[1], cursor);
+      chart.focus(Math.max(0, span[0] - pad), Math.min(view.length - 1, maxBar + pad));
       $("chart").scrollIntoView({ block: "nearest", behavior: "smooth" });
     },
     signals,
@@ -171,10 +190,31 @@ async function main(): Promise<void> {
   let base = baseInterval(bars);
   let active = TIMEFRAMES.find((t) => isResamplable(base, t.sec))?.sec ?? base;
 
+  function tradesKey(tradesList: Trade[]): string {
+    return tradesList.map((t) => `${t.id}:${t.exit_time !== null ? 1 : 0}`).join(",");
+  }
+
+  let lastPanelKey = "";
+
   replay.onFrame((frame) => {
     chart.setBars(frame.visibleBars, false);
     chart.setTrades(frame.visibleTrades, frame.visibleBars);
     chart.setSignals(frame.visibleSignals, frame.visibleBars);
+
+    const isLive = frame.isLive;
+    const currentTrades = isLive ? overlayTrades : frame.visibleTrades;
+    const currentSignals = isLive ? overlaySignals : frame.visibleSignals;
+    const key = (isLive ? "live:" : "ghost:") + tradesKey(currentTrades) + "|" + currentSignals.length;
+
+    if (key !== lastPanelKey) {
+      lastPanelKey = key;
+      const s = isLive ? stats : computeStats(currentTrades);
+      ledger.update(currentTrades, currentSignals);
+      renderStats(s, currentTrades);
+      renderHeaderStats(s);
+      refreshSelectedTrade(currentTrades);
+    }
+
     renderTicker(frame.visibleBars);
     const latestBar = frame.visibleBars[frame.visibleBars.length - 1];
     setBarCountdownContext(latestBar ? latestBar.time : null, active);
@@ -185,6 +225,7 @@ async function main(): Promise<void> {
       active = base;
     }
     view = active === base || base === 0 ? bars : resample(bars, active, base);
+    lastPanelKey = "";
     replay.setData(view, overlayTrades, overlaySignals);
     replayBar.setTrades(overlayTrades, view);
     chart.fit();
