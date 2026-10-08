@@ -5,7 +5,10 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Request, State,
     },
-    http::{header, HeaderMap, StatusCode, Uri},
+    http::{
+        header::{self, HeaderName},
+        HeaderMap, HeaderValue, StatusCode, Uri,
+    },
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
@@ -14,7 +17,7 @@ use axum::{
 use rust_embed::RustEmbed;
 use serde_json::json;
 use tokio::sync::broadcast::{self, error::RecvError};
-use tower_http::trace::TraceLayer;
+use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 
 use crate::{
     config::Config,
@@ -41,6 +44,10 @@ pub struct AppState {
 }
 
 pub fn router(state: AppState) -> Router {
+    const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+                       img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:; \
+                       object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/bars", get(get_bars))
@@ -53,6 +60,18 @@ pub fn router(state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_allowed_host,
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static(CSP),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
         ))
         .with_state(state)
 }
@@ -219,19 +238,50 @@ fn handle_inbound_text(text: &str, bus: &EventBus, publish: bool) {
 }
 
 async fn static_handler(uri: Uri) -> Response {
-    let path = uri.path().trim_start_matches('/');
-    if path.starts_with("api/") || path.starts_with("ws/") {
+    let raw_path = uri.path().trim_start_matches('/');
+    if raw_path == "api"
+        || raw_path.starts_with("api/")
+        || raw_path == "ws"
+        || raw_path.starts_with("ws/")
+    {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let path = if path.is_empty() { "index.html" } else { path };
+    let is_index = raw_path.is_empty() || raw_path == "index.html";
+    let lookup_path = if is_index { "index.html" } else { raw_path };
 
-    if let Some(file) = Assets::get(path) {
-        let mime = mime_guess::from_path(path).first_or_octet_stream();
-        return ([(header::CONTENT_TYPE, mime.as_ref())], file.data).into_response();
+    if let Some(file) = Assets::get(lookup_path) {
+        let mime = mime_guess::from_path(lookup_path).first_or_octet_stream();
+        let cache_control = if lookup_path.starts_with("assets/") {
+            "public, max-age=31536000, immutable"
+        } else if is_index {
+            "no-cache"
+        } else {
+            ""
+        };
+
+        let mut res = ([(header::CONTENT_TYPE, mime.as_ref())], file.data).into_response();
+        if !cache_control.is_empty() {
+            res.headers_mut().insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static(cache_control),
+            );
+        }
+        return res;
     }
+
+    let has_extension = std::path::Path::new(lookup_path).extension().is_some();
+    if lookup_path.starts_with("assets/") || has_extension {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
     // SPA fallback
     match Assets::get("index.html") {
-        Some(file) => ([(header::CONTENT_TYPE, "text/html")], file.data).into_response(),
+        Some(file) => {
+            let mut res = ([(header::CONTENT_TYPE, "text/html")], file.data).into_response();
+            res.headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+            res
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -535,5 +585,112 @@ mod tests {
             }
             _ => panic!("unexpected event variant"),
         }
+    }
+
+    #[tokio::test]
+    async fn security_headers_present_on_endpoints() {
+        let res = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/health")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers().get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+            "nosniff"
+        );
+        assert_eq!(
+            res.headers().get(header::REFERRER_POLICY).unwrap(),
+            "no-referrer"
+        );
+        let csp = res
+            .headers()
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("default-src 'self'"));
+        assert!(csp.contains("frame-ancestors 'none'"));
+    }
+
+    #[tokio::test]
+    async fn api_and_ws_prefixes_without_slash_return_404() {
+        assert_eq!(status("/api").await, StatusCode::NOT_FOUND);
+        assert_eq!(status("/api/").await, StatusCode::NOT_FOUND);
+        assert_eq!(status("/ws").await, StatusCode::NOT_FOUND);
+        assert_eq!(status("/ws/").await, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn missing_assets_with_extensions_return_404() {
+        assert_eq!(status("/assets/missing.js").await, StatusCode::NOT_FOUND);
+        assert_eq!(status("/fonts/missing.woff2").await, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn cache_control_and_spa_fallback() {
+        // Root / index gets no-cache
+        let res_root = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_root.status(), StatusCode::OK);
+        assert_eq!(
+            res_root.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-cache"
+        );
+
+        // SPA route fallback (extensionless) gets 200 with no-cache
+        let res_spa = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/replay")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_spa.status(), StatusCode::OK);
+        assert_eq!(
+            res_spa.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-cache"
+        );
+        assert_eq!(
+            res_spa.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/html"
+        );
+
+        // Hashed asset in assets/ (find existing asset from embed)
+        let asset_name = Assets::iter()
+            .find(|p| p.starts_with("assets/"))
+            .expect("should have at least one asset in assets/");
+        let res_asset = app()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/{}", asset_name))
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_asset.status(), StatusCode::OK);
+        assert_eq!(
+            res_asset.headers().get(header::CACHE_CONTROL).unwrap(),
+            "public, max-age=31536000, immutable"
+        );
     }
 }
