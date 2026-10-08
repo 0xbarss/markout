@@ -13,7 +13,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use super::{
     finish_trades, io_err, normalize_bars, normalize_time, validate_bar, IngestError, Result,
 };
-use crate::models::{ExitReason, StopPoint, Trade, TradeSide, Bar};
+use crate::models::{Bar, ExitReason, StopPoint, Trade, TradeSide};
 
 fn find_column_index(schema: &Schema, candidates: &[&str]) -> Option<usize> {
     for candidate in candidates {
@@ -71,13 +71,13 @@ fn get_timestamp(col: &dyn Array, row: usize) -> Option<i64> {
         }
         DataType::Int64 => Some(normalize_time(col.as_primitive::<Int64Type>().value(row))),
         DataType::UInt64 => Some(normalize_time(
-            col.as_primitive::<UInt64Type>().value(row) as i64,
+            col.as_primitive::<UInt64Type>().value(row) as i64
         )),
         DataType::Int32 => Some(normalize_time(
-            col.as_primitive::<Int32Type>().value(row) as i64,
+            col.as_primitive::<Int32Type>().value(row) as i64
         )),
         DataType::UInt32 => Some(normalize_time(
-            col.as_primitive::<UInt32Type>().value(row) as i64,
+            col.as_primitive::<UInt32Type>().value(row) as i64
         )),
         DataType::Date32 => {
             let days = col.as_primitive::<Date32Type>().value(row);
@@ -88,7 +88,7 @@ fn get_timestamp(col: &dyn Array, row: usize) -> Option<i64> {
             Some(ms / 1000)
         }
         DataType::Float64 => Some(normalize_time(
-            col.as_primitive::<Float64Type>().value(row) as i64,
+            col.as_primitive::<Float64Type>().value(row) as i64
         )),
         DataType::Utf8 => {
             let s = col.as_string::<i32>().value(row);
@@ -133,33 +133,38 @@ pub fn load_bars(path: &Path) -> Result<Vec<Bar>> {
 
     let time_idx = find_column_index(
         &schema,
-        &["time", "timestamp", "timestamp_ms", "datetime", "date", "ts", "t"],
+        &[
+            "time",
+            "timestamp",
+            "timestamp_ms",
+            "datetime",
+            "date",
+            "ts",
+            "t",
+        ],
     )
     .ok_or_else(|| IngestError::MissingColumn {
         table: "parquet_bars",
         column: "time/timestamp",
     })?;
 
-    let open_idx = find_column_index(&schema, &["open", "o"]).ok_or_else(|| {
-        IngestError::MissingColumn {
+    let open_idx =
+        find_column_index(&schema, &["open", "o"]).ok_or_else(|| IngestError::MissingColumn {
             table: "parquet_bars",
             column: "open",
-        }
-    })?;
+        })?;
 
-    let high_idx = find_column_index(&schema, &["high", "h"]).ok_or_else(|| {
-        IngestError::MissingColumn {
+    let high_idx =
+        find_column_index(&schema, &["high", "h"]).ok_or_else(|| IngestError::MissingColumn {
             table: "parquet_bars",
             column: "high",
-        }
-    })?;
+        })?;
 
-    let low_idx = find_column_index(&schema, &["low", "l"]).ok_or_else(|| {
-        IngestError::MissingColumn {
+    let low_idx =
+        find_column_index(&schema, &["low", "l"]).ok_or_else(|| IngestError::MissingColumn {
             table: "parquet_bars",
             column: "low",
-        }
-    })?;
+        })?;
 
     let close_idx = find_column_index(&schema, &["close", "c", "price"]).ok_or_else(|| {
         IngestError::MissingColumn {
@@ -185,12 +190,11 @@ pub fn load_bars(path: &Path) -> Result<Vec<Bar>> {
 
         for r in 0..batch.num_rows() {
             row_count += 1;
-            let time = get_timestamp(time_col.as_ref(), r).ok_or_else(|| {
-                IngestError::InvalidBar {
+            let time =
+                get_timestamp(time_col.as_ref(), r).ok_or_else(|| IngestError::InvalidBar {
                     row: row_count,
                     reason: "missing or invalid timestamp".to_string(),
-                }
-            })?;
+                })?;
             let open = get_f64(open_col.as_ref(), r).ok_or_else(|| IngestError::InvalidBar {
                 row: row_count,
                 reason: "missing or invalid open price".to_string(),
@@ -207,9 +211,7 @@ pub fn load_bars(path: &Path) -> Result<Vec<Bar>> {
                 row: row_count,
                 reason: "missing or invalid close price".to_string(),
             })?;
-            let volume = vol_col
-                .and_then(|c| get_f64(c.as_ref(), r))
-                .unwrap_or(0.0);
+            let volume = vol_col.and_then(|c| get_f64(c.as_ref(), r)).unwrap_or(0.0);
 
             let bar = Bar {
                 time,
@@ -219,8 +221,10 @@ pub fn load_bars(path: &Path) -> Result<Vec<Bar>> {
                 close,
                 volume,
             };
-            validate_bar(&bar)
-                .map_err(|reason| IngestError::InvalidBar { row: row_count, reason })?;
+            validate_bar(&bar).map_err(|reason| IngestError::InvalidBar {
+                row: row_count,
+                reason,
+            })?;
             bars.push(bar);
         }
     }
@@ -265,8 +269,7 @@ pub fn load_trades(path: &Path) -> Result<Vec<Trade>> {
         column: "entry_price/price",
     })?;
 
-    let exit_time_idx =
-        find_column_index(&schema, &["exit_time", "close_time", "exit_timestamp"]);
+    let exit_time_idx = find_column_index(&schema, &["exit_time", "close_time", "exit_timestamp"]);
     let exit_price_idx = find_column_index(&schema, &["exit_price", "close_price"]);
     let exit_reason_idx = find_column_index(&schema, &["exit_reason", "reason", "exit_type"]);
     let sl_idx = find_column_index(&schema, &["initial_sl", "sl", "stop_loss", "stop"]);
@@ -334,9 +337,7 @@ pub fn load_trades(path: &Path) -> Result<Vec<Trade>> {
                 })
                 .unwrap_or(TradeSide::Buy);
 
-            let size = size_col
-                .and_then(|c| get_f64(c.as_ref(), r))
-                .unwrap_or(1.0);
+            let size = size_col.and_then(|c| get_f64(c.as_ref(), r)).unwrap_or(1.0);
 
             let entry_time = get_timestamp(entry_time_col.as_ref(), r).ok_or_else(|| {
                 IngestError::InvalidTrade {
@@ -345,12 +346,11 @@ pub fn load_trades(path: &Path) -> Result<Vec<Trade>> {
                 }
             })?;
 
-            let entry_price = get_f64(entry_price_col.as_ref(), r).ok_or_else(|| {
-                IngestError::InvalidTrade {
+            let entry_price =
+                get_f64(entry_price_col.as_ref(), r).ok_or_else(|| IngestError::InvalidTrade {
                     id: id.to_string(),
                     reason: "missing entry price".to_string(),
-                }
-            })?;
+                })?;
 
             let exit_time = exit_time_col.and_then(|c| get_timestamp(c.as_ref(), r));
             let exit_price = exit_price_col.and_then(|c| get_f64(c.as_ref(), r));
