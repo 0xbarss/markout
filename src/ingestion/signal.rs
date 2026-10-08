@@ -68,6 +68,18 @@ pub fn finish_signals(mut signals: Vec<Signal>) -> Result<Vec<Signal>> {
             seen.insert(candidate.clone());
             s.id = candidate;
         }
+        if s.time <= 0 {
+            return Err(IngestError::InvalidSignal {
+                id: s.id.clone(),
+                reason: "timestamp must be positive".into(),
+            });
+        }
+        if let Err(reason) = s.validate() {
+            return Err(IngestError::InvalidSignal {
+                id: s.id.clone(),
+                reason: reason.into(),
+            });
+        }
     }
     signals.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| a.id.cmp(&b.id)));
     Ok(signals)
@@ -449,6 +461,63 @@ mod tests {
                 assert!(reason.contains("duplicate signal id"));
             }
             other => panic!("expected duplicate signal id error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_buy_with_stop_loss_above_entry() {
+        let jsonl = r#"{"id": "sig-bad-buy", "time": 1700000000, "direction": "buy", "entry_price": 100.0, "stop_loss": 105.0}"#;
+        match parse_jsonl(jsonl.as_bytes()) {
+            Err(IngestError::InvalidSignal { id, reason }) => {
+                assert_eq!(id, "sig-bad-buy");
+                assert!(reason.contains("buy stop loss must be below entry price"));
+            }
+            other => panic!("expected InvalidSignal for inverted buy SL, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_sell_with_take_profit_above_entry() {
+        let jsonl = r#"{"id": "sig-bad-sell", "time": 1700000000, "direction": "sell", "entry_price": 100.0, "stop_loss": 105.0, "take_profit": 110.0}"#;
+        match parse_jsonl(jsonl.as_bytes()) {
+            Err(IngestError::InvalidSignal { id, reason }) => {
+                assert_eq!(id, "sig-bad-sell");
+                assert!(reason.contains("sell take profit must be below entry price"));
+            }
+            other => panic!("expected InvalidSignal for sell TP above entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn allows_zero_take_profit() {
+        let jsonl = r#"{"id": "sig-no-tp", "time": 1700000000, "direction": "buy", "entry_price": 100.0, "stop_loss": 95.0, "take_profit": 0.0}"#;
+        let sigs = parse_jsonl(jsonl.as_bytes()).unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0].take_profit, 0.0);
+    }
+
+    #[test]
+    fn rejects_nan_or_infinite_price() {
+        let jsonl = r#"{"id": "sig-nan", "time": 1700000000, "direction": "buy", "entry_price": "NaN", "stop_loss": 95.0}"#;
+        assert!(parse_jsonl(jsonl.as_bytes()).is_err());
+
+        let sig = Signal {
+            id: "sig-nan-price".into(),
+            time: 1700000000,
+            symbol: None,
+            direction: Direction::Buy,
+            entry_price: f64::NAN,
+            stop_loss: 95.0,
+            take_profit: 110.0,
+            strategy: None,
+            comment: None,
+        };
+        match finish_signals(vec![sig]) {
+            Err(IngestError::InvalidSignal { id, reason }) => {
+                assert_eq!(id, "sig-nan-price");
+                assert!(reason.contains("entry price must be finite"));
+            }
+            other => panic!("expected InvalidSignal for NaN entry price, got {other:?}"),
         }
     }
 }

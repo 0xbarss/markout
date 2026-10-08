@@ -38,14 +38,7 @@ impl MarketEvent {
                     && t.ask.is_none_or(|p| p.is_finite() && p > 0.0)
             }
             MarketEvent::Trade(u) => crate::ingestion::validate_trade(&u.trade).is_ok(),
-            MarketEvent::Signal(s) => {
-                s.time > 0
-                    && s.entry_price.is_finite()
-                    && s.entry_price > 0.0
-                    && s.stop_loss.is_finite()
-                    && s.take_profit.is_finite()
-                    && s.is_valid()
-            }
+            MarketEvent::Signal(s) => s.time > 0 && s.is_valid(),
             MarketEvent::RiskBracket {
                 stop_loss,
                 take_profit,
@@ -183,5 +176,44 @@ mod tests {
             ask: None,
         });
         assert!(!invalid_tick.is_valid());
+
+        let valid_signal_buy = MarketEvent::Signal(Signal {
+            id: "sig_buy".into(),
+            time: 1_700_000_000,
+            symbol: Some("BTCUSDT".into()),
+            direction: crate::models::Direction::Buy,
+            entry_price: 50000.0,
+            stop_loss: 49000.0,
+            take_profit: 52000.0,
+            strategy: None,
+            comment: None,
+        });
+        assert!(valid_signal_buy.is_valid());
+
+        let valid_signal_hold = MarketEvent::Signal(Signal {
+            id: "sig_hold".into(),
+            time: 1_700_000_000,
+            symbol: Some("BTCUSDT".into()),
+            direction: crate::models::Direction::Hold,
+            entry_price: 50000.0,
+            stop_loss: 0.0,
+            take_profit: 0.0,
+            strategy: None,
+            comment: None,
+        });
+        assert!(valid_signal_hold.is_valid());
+
+        let invalid_signal_geom = MarketEvent::Signal(Signal {
+            id: "sig_bad".into(),
+            time: 1_700_000_000,
+            symbol: Some("BTCUSDT".into()),
+            direction: crate::models::Direction::Buy,
+            entry_price: 50000.0,
+            stop_loss: 51000.0,
+            take_profit: 52000.0,
+            strategy: None,
+            comment: None,
+        });
+        assert!(!invalid_signal_geom.is_valid());
     }
 }
