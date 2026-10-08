@@ -37,6 +37,10 @@ pub struct Cli {
     #[arg(long = "allow-ws-publish", global = true)]
     pub allow_ws_publish: bool,
 
+    /// Allow lenient parsing for trade files (e.g. Parquet defaults).
+    #[arg(long = "lenient", global = true)]
+    pub lenient: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -91,6 +95,7 @@ pub struct Config {
     pub allow_hosts: Vec<String>,
     pub allow_origins: Vec<String>,
     pub allow_ws_publish: bool,
+    pub lenient: bool,
 }
 
 impl From<Cli> for Config {
@@ -114,6 +119,7 @@ impl From<Cli> for Config {
             allow_hosts: cli.allow_host,
             allow_origins: cli.allow_origin,
             allow_ws_publish: cli.allow_ws_publish,
+            lenient: cli.lenient,
         }
     }
 }

@@ -25,7 +25,12 @@ pub async fn serve(config: Config, bus: EventBus) -> anyhow::Result<()> {
             trades,
             bars,
             strategy,
-        } => Dataset::load(trades.as_deref(), bars.as_deref(), strategy.as_deref())?,
+        } => Dataset::load_opts(
+            trades.as_deref(),
+            bars.as_deref(),
+            strategy.as_deref(),
+            config.lenient,
+        )?,
         Mode::Live { .. } => Dataset::default(),
     };
     tracing::info!(

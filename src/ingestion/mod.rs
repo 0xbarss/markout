@@ -193,9 +193,19 @@ impl Dataset {
         bars: Option<&Path>,
         strategy: Option<&Path>,
     ) -> Result<Self> {
+        Self::load_opts(trades, bars, strategy, false)
+    }
+
+    /// Load dataset with optional lenient mode for trades.
+    pub fn load_opts(
+        trades: Option<&Path>,
+        bars: Option<&Path>,
+        strategy: Option<&Path>,
+        lenient: bool,
+    ) -> Result<Self> {
         let mut ds = Dataset::default();
         if let Some(p) = trades {
-            ds.trades = load_trades(p)?;
+            ds.trades = load_trades_opts(p, lenient)?;
         }
         if let Some(p) = strategy {
             ds.signals = signal::load(p)?;
@@ -217,8 +227,12 @@ impl Dataset {
 }
 
 pub fn load_trades(path: &Path) -> Result<Vec<Trade>> {
+    load_trades_opts(path, false)
+}
+
+pub fn load_trades_opts(path: &Path, lenient: bool) -> Result<Vec<Trade>> {
     if is_parquet_format(path) {
-        parquet::load_trades(path)
+        parquet::load_trades_opts(path, lenient)
     } else if json::is_text_format(path) {
         json::load_trades(path)
     } else {
