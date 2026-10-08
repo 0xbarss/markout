@@ -104,8 +104,25 @@ async fn require_allowed_host(State(state): State<AppState>, req: Request, next:
     next.run(req).await
 }
 
+pub async fn resolve_host(host: &str, port: u16) -> anyhow::Result<SocketAddr> {
+    let clean_host = host.trim_matches(|c| c == '[' || c == ']');
+    let addrs = tokio::net::lookup_host((clean_host, port)).await?;
+    let mut chosen = None;
+    for addr in addrs {
+        if chosen.is_none() {
+            chosen = Some(addr);
+        }
+        if addr.ip().is_loopback() && addr.is_ipv4() {
+            chosen = Some(addr);
+            break;
+        }
+    }
+    chosen.ok_or_else(|| anyhow::anyhow!("cannot resolve host `{host}`"))
+}
+
 pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result<()> {
-    let host_is_loopback = matches!(config.host.as_str(), "127.0.0.1" | "localhost" | "::1");
+    let addr = resolve_host(&config.host, config.port).await?;
+    let host_is_loopback = addr.ip().is_loopback();
     if !host_is_loopback {
         tracing::warn!(
             "listening on non-loopback address {}; no authentication is configured",
@@ -119,6 +136,11 @@ pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result
     }
     if !matches!(config.host.as_str(), "0.0.0.0" | "::") {
         allowed_hosts.insert(config.host.clone());
+        let clean = config
+            .host
+            .trim_matches(|c| c == '[' || c == ']')
+            .to_string();
+        allowed_hosts.insert(clean);
     }
 
     let state = AppState {
@@ -130,7 +152,6 @@ pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result
         allowed_origins: Arc::new(config.allow_origins),
         allow_ws_publish: config.allow_ws_publish,
     };
-    let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(
         "markout ({}) listening on http://{}",
@@ -692,5 +713,27 @@ mod tests {
             res_asset.headers().get(header::CACHE_CONTROL).unwrap(),
             "public, max-age=31536000, immutable"
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_host_supports_hostnames_and_ipv6() {
+        let addr_v4 = resolve_host("127.0.0.1", 8080).await.unwrap();
+        assert_eq!(addr_v4, "127.0.0.1:8080".parse::<SocketAddr>().unwrap());
+
+        let addr_localhost = resolve_host("localhost", 8080).await.unwrap();
+        assert!(addr_localhost.ip().is_loopback());
+        assert_eq!(addr_localhost.port(), 8080);
+
+        let addr_v6 = resolve_host("::1", 8080).await.unwrap();
+        assert_eq!(addr_v6, "[::1]:8080".parse::<SocketAddr>().unwrap());
+
+        let addr_v6_bracketed = resolve_host("[::1]", 8080).await.unwrap();
+        assert_eq!(
+            addr_v6_bracketed,
+            "[::1]:8080".parse::<SocketAddr>().unwrap()
+        );
+
+        let err = resolve_host("invalid-host-name-markout-does-not-exist.test", 8080).await;
+        assert!(err.is_err());
     }
 }
