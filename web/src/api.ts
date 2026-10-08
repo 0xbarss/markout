@@ -6,12 +6,20 @@ async function getJSON<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function loadAll(): Promise<[Bar[], Trade[], Stats, Signal[]]> {
+export interface Health {
+  status: string;
+  version: string;
+  mode: string;
+  tf?: number | null;
+}
+
+export function loadAll(): Promise<[Bar[], Trade[], Stats, Signal[], Health]> {
   return Promise.all([
     getJSON<Bar[]>("/api/v1/bars"),
     getJSON<Trade[]>("/api/v1/trades"),
     getJSON<Stats>("/api/v1/stats"),
     getJSON<Signal[]>("/api/v1/signals").catch(() => []),
+    getJSON<Health>("/api/v1/health").catch(() => ({ status: "ok", version: "unknown", mode: "offline" })),
   ]);
 }
 

@@ -86,6 +86,30 @@ impl Mode {
     }
 }
 
+/// Parse a timeframe string into seconds (e.g. "15m" -> 900, "1h" -> 3600, "60" -> 60).
+pub fn parse_timeframe_sec(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Ok(sec) = s.parse::<u64>() {
+        return if sec > 0 { Some(sec) } else { None };
+    }
+    let num_end = s.find(|c: char| !c.is_ascii_digit())?;
+    let (num_part, unit_part) = s.split_at(num_end);
+    let n: u64 = num_part.parse().ok()?;
+    let mult = match unit_part {
+        "s" | "S" => 1,
+        "m" => 60,
+        "h" | "H" => 3600,
+        "d" | "D" => 86400,
+        "w" | "W" => 604800,
+        "M" => 2592000,
+        _ => return None,
+    };
+    Some(n.saturating_mul(mult))
+}
+
 /// Resolved runtime configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -196,5 +220,18 @@ mod tests {
         assert_eq!(c.allow_hosts, vec!["example.com", "192.168.1.50"]);
         assert_eq!(c.allow_origins, vec!["https://app.example.com"]);
         assert!(c.allow_ws_publish);
+    }
+
+    #[test]
+    fn parse_timeframe_seconds() {
+        assert_eq!(parse_timeframe_sec("60"), Some(60));
+        assert_eq!(parse_timeframe_sec("15m"), Some(900));
+        assert_eq!(parse_timeframe_sec("1h"), Some(3600));
+        assert_eq!(parse_timeframe_sec("1D"), Some(86400));
+        assert_eq!(parse_timeframe_sec("1W"), Some(604800));
+        assert_eq!(parse_timeframe_sec("1M"), Some(2592000));
+        assert_eq!(parse_timeframe_sec("invalid"), None);
+        assert_eq!(parse_timeframe_sec("0"), None);
+        assert_eq!(parse_timeframe_sec(""), None);
     }
 }

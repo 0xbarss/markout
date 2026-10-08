@@ -28,10 +28,52 @@ export const TIMEFRAMES = [
 /** Median spacing between bars in seconds (0 when it cannot be determined). */
 export function baseInterval(bars: Bar[]): number {
   if (bars.length < 2) return 0;
+  const sampleCount = Math.min(bars.length - 1, 1000);
+  const startIdx = bars.length - sampleCount;
   const diffs: number[] = [];
-  for (let i = 1; i < bars.length; i++) diffs.push(bars[i].time - bars[i - 1].time);
+  for (let i = startIdx; i < bars.length; i++) {
+    const diff = bars[i].time - bars[i - 1].time;
+    if (diff > 0) {
+      diffs.push(diff);
+    }
+  }
+  if (diffs.length === 0) return 0;
   diffs.sort((a, b) => a - b);
   return diffs[Math.floor(diffs.length / 2)];
+}
+
+/** Parse a timeframe string or numeric seconds value into integer seconds. */
+export function parseTimeframe(input: string | number): number | null {
+  if (typeof input === "number") {
+    return Number.isFinite(input) && input > 0 ? Math.floor(input) : null;
+  }
+  const s = input.trim();
+  if (!s) return null;
+  const exact = TIMEFRAMES.find((t) => t.label === s);
+  if (exact) return exact.sec;
+  const lowerMatch = TIMEFRAMES.find((t) => t.label.toLowerCase() === s.toLowerCase());
+  if (lowerMatch && s !== "1M") return lowerMatch.sec;
+  const num = Number(s);
+  if (Number.isFinite(num) && num > 0) return Math.floor(num);
+  const m = s.match(/^(\d+)\s*([a-zA-Z]+)$/);
+  if (!m) return null;
+  const val = parseInt(m[1], 10);
+  const unit = m[2];
+  if (unit === "M") return val * 2592000;
+  switch (unit.toLowerCase()) {
+    case "s":
+      return val;
+    case "m":
+      return val * 60;
+    case "h":
+      return val * 3600;
+    case "d":
+      return val * 86400;
+    case "w":
+      return val * 604800;
+    default:
+      return null;
+  }
 }
 
 /**

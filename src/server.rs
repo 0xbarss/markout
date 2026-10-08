@@ -20,7 +20,7 @@ use tokio::sync::broadcast::{self, error::RecvError};
 use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
 
 use crate::{
-    config::Config,
+    config::{Config, Mode},
     event_bus::{EventBus, MarketEvent},
     ingestion::Dataset,
     models::{Bar, Signal, Trade},
@@ -36,6 +36,7 @@ struct Assets;
 pub struct AppState {
     pub bus: EventBus,
     pub mode: &'static str,
+    pub tf: Option<u64>,
     pub data: Arc<Dataset>,
     pub host: String,
     pub allowed_hosts: Arc<HashSet<String>>,
@@ -143,9 +144,15 @@ pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result
         allowed_hosts.insert(clean);
     }
 
+    let tf = match &config.mode {
+        Mode::Live { tf, .. } => tf.as_deref().and_then(crate::config::parse_timeframe_sec),
+        _ => None,
+    };
+
     let state = AppState {
         bus,
         mode: config.mode.name(),
+        tf,
         data: Arc::new(data),
         host: config.host.clone(),
         allowed_hosts: Arc::new(allowed_hosts),
@@ -168,7 +175,12 @@ pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result
 }
 
 async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION"), "mode": state.mode }))
+    let mut payload =
+        json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION"), "mode": state.mode });
+    if let Some(tf) = state.tf {
+        payload["tf"] = json!(tf);
+    }
+    Json(payload)
 }
 
 async fn get_bars(State(state): State<AppState>) -> Json<Vec<Bar>> {
@@ -327,6 +339,7 @@ mod tests {
         let state = AppState {
             bus: bus.clone(),
             mode: "offline",
+            tf: None,
             data: Arc::new(data),
             host: "127.0.0.1".into(),
             allowed_hosts: Arc::new(allowed_hosts.iter().map(|s| s.to_string()).collect()),
@@ -357,6 +370,38 @@ mod tests {
     #[tokio::test]
     async fn health_ok() {
         assert_eq!(status("/api/v1/health").await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn health_live_with_timeframe_returns_tf() {
+        let bus = EventBus::default();
+        let state = AppState {
+            bus,
+            mode: "live",
+            tf: Some(900),
+            data: Arc::new(Dataset::default()),
+            host: "127.0.0.1".into(),
+            allowed_hosts: Arc::new(HashSet::new()),
+            allowed_origins: Arc::new(Vec::new()),
+            allow_ws_publish: false,
+        };
+        let res = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/health")
+                    .header(header::HOST, "127.0.0.1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["mode"], "live");
+        assert_eq!(body["tf"], 900);
     }
 
     #[tokio::test]

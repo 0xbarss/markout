@@ -4,7 +4,8 @@ import { createTerminalChart, type Ohlc } from "./chart.ts";
 import { $, h } from "./dom.ts";
 import { fmtPrice, fmtSigned, signClass } from "./format.ts";
 import { spanOf } from "./overlays/sl_tp_trail.ts";
-import { baseInterval, isResamplable, resample, TIMEFRAMES } from "./resample.ts";
+import { baseInterval, isResamplable, parseTimeframe, resample } from "./resample.ts";
+import { LiveState } from "./live.ts";
 
 import { ReplayController } from "./replay/controller.ts";
 import { computeStats } from "./stats.ts";
@@ -48,7 +49,7 @@ function dominantSymbol(trades: Trade[]): string {
 }
 
 async function main(): Promise<void> {
-  const [initialBars, initialTrades, initialStats, initialSignals] = await loadAll();
+  const [initialBars, initialTrades, initialStats, initialSignals, health] = await loadAll();
   const chart = createTerminalChart($("chart"));
   const replay = new ReplayController();
   const replayBar = mountReplayBar(replay);
@@ -187,8 +188,25 @@ async function main(): Promise<void> {
     },
   );
 
-  let base = baseInterval(bars);
-  let active = TIMEFRAMES.find((t) => isResamplable(base, t.sec))?.sec ?? base;
+  let configuredBase = 0;
+  if (typeof window !== "undefined" && window.location) {
+    const params = new URLSearchParams(window.location.search);
+    const paramTf = params.get("tf");
+    if (paramTf) {
+      const parsed = parseTimeframe(paramTf);
+      if (parsed) configuredBase = parsed;
+    }
+  }
+  if (configuredBase === 0 && health.tf) {
+    configuredBase = health.tf;
+  }
+
+  let initialBase = baseInterval(bars);
+  if (initialBase === 0 && configuredBase > 0) {
+    initialBase = configuredBase;
+  }
+
+  const liveState = new LiveState({ initialBase });
 
   function tradesKey(tradesList: Trade[]): string {
     return tradesList.map((t) => `${t.id}:${t.exit_time !== null ? 1 : 0}`).join(",");
@@ -217,12 +235,15 @@ async function main(): Promise<void> {
 
     renderTicker(frame.visibleBars);
     const latestBar = frame.visibleBars[frame.visibleBars.length - 1];
-    setBarCountdownContext(latestBar ? latestBar.time : null, active);
+    setBarCountdownContext(latestBar ? latestBar.time : null, liveState.getActive());
     renderLegend(null, latestBar);
   });
   const apply = () => {
-    if (!isResamplable(base, active)) {
+    const base = liveState.getBase();
+    let active = liveState.getActive();
+    if (base > 0 && !isResamplable(base, active)) {
       active = base;
+      liveState.setActive(base);
     }
     view = active === base || base === 0 ? bars : resample(bars, active, base);
     lastPanelKey = "";
@@ -233,8 +254,7 @@ async function main(): Promise<void> {
     setBarCountdownContext(latestBar ? latestBar.time : null, active);
     chart.drawings.setContext(symbol, active);
     renderTimeframes(base, active, (sec) => {
-      if (isResamplable(base, sec)) {
-        active = sec;
+      if (liveState.setActive(sec)) {
         apply();
       }
     });
@@ -252,41 +272,19 @@ async function main(): Promise<void> {
     switch (event.type) {
       case "bar": {
         const b = event.data;
-        if (bars.length === 0) {
-          bars.push(b);
+        const wasEmpty = bars.length === 0;
+        const { updatedBar, needsReapply } = liveState.onBar(bars, b);
+
+        if (wasEmpty) {
           $("empty").hidden = true;
-          base = baseInterval(bars);
-          active = TIMEFRAMES.find((t) => isResamplable(base, t.sec))?.sec ?? base;
           apply();
           return;
         }
 
-
-        const existingIdx = bars.findIndex((x) => x.time === b.time);
-        if (existingIdx >= 0) {
-          bars[existingIdx] = b;
-        } else if (bars.length === 0 || b.time > bars[bars.length - 1].time) {
-          bars.push(b);
-        }
-
-        if (active === base || base === 0) {
-          replay.appendOrUpdateBar(b);
+        if (needsReapply) {
+          apply();
         } else {
-          const bucketTime = Math.floor(b.time / active) * active;
-          const bucketBars = bars.filter(
-            (item) => item.time >= bucketTime && item.time < bucketTime + active,
-          );
-          if (bucketBars.length > 0) {
-            const bucketBar: Bar = {
-              time: bucketTime,
-              open: bucketBars[0].open,
-              high: Math.max(...bucketBars.map((x) => x.high)),
-              low: Math.min(...bucketBars.map((x) => x.low)),
-              close: bucketBars[bucketBars.length - 1].close,
-              volume: bucketBars.reduce((acc, x) => acc + x.volume, 0),
-            };
-            replay.appendOrUpdateBar(bucketBar);
-          }
+          replay.appendOrUpdateBar(updatedBar);
         }
         break;
       }
@@ -311,7 +309,7 @@ async function main(): Promise<void> {
         if (symbol === "—" && t.symbol) {
           symbol = t.symbol;
           renderSymbol(symbol);
-          chart.drawings.setContext(symbol, active);
+          chart.drawings.setContext(symbol, liveState.getActive());
         }
         overlayTrades = trades.filter((x) => x.symbol === symbol);
         ledger.update(trades);
