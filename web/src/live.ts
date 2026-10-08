@@ -12,6 +12,36 @@ export interface LiveBarResult {
   needsReapply: boolean;
 }
 
+function findBarIndex(bars: Bar[], time: number): number {
+  if (bars.length === 0) return -1;
+  const last = bars[bars.length - 1];
+  if (last.time === time) return bars.length - 1;
+  if (last.time < time) return -1;
+  let low = 0;
+  let high = bars.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    const midTime = bars[mid].time;
+    if (midTime === time) return mid;
+    if (midTime < time) low = mid + 1;
+    else high = mid - 1;
+  }
+  return -1;
+}
+
+function findBarInsertIndex(bars: Bar[], time: number): number {
+  if (bars.length === 0) return 0;
+  if (time > bars[bars.length - 1].time) return bars.length;
+  let low = 0;
+  let high = bars.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (bars[mid].time >= time) high = mid - 1;
+    else low = mid + 1;
+  }
+  return low;
+}
+
 export class LiveState {
   private base: number;
   private active: number;
@@ -59,17 +89,18 @@ export class LiveState {
         needsReapply = true;
       }
     } else {
-      const existingIdx = bars.findIndex((x) => x.time === b.time);
-      if (existingIdx >= 0) {
-        bars[existingIdx] = b;
-      } else if (b.time > bars[bars.length - 1].time) {
+      const last = bars[bars.length - 1];
+      if (last.time === b.time) {
+        bars[bars.length - 1] = b;
+      } else if (b.time > last.time) {
         bars.push(b);
       } else {
-        const insertIdx = bars.findIndex((x) => x.time > b.time);
-        if (insertIdx >= 0) {
-          bars.splice(insertIdx, 0, b);
+        const existingIdx = findBarIndex(bars, b.time);
+        if (existingIdx >= 0) {
+          bars[existingIdx] = b;
         } else {
-          bars.push(b);
+          const insertIdx = findBarInsertIndex(bars, b.time);
+          bars.splice(insertIdx, 0, b);
         }
       }
 
@@ -88,17 +119,39 @@ export class LiveState {
       updatedBar = b;
     } else {
       const bucketTime = Math.floor(b.time / this.active) * this.active;
-      const bucketBars = bars.filter(
-        (item) => item.time >= bucketTime && item.time < bucketTime + this.active,
-      );
-      if (bucketBars.length > 0) {
+      const bucketEnd = bucketTime + this.active;
+      let open = 0;
+      let high = -Infinity;
+      let low = Infinity;
+      let close = 0;
+      let volume = 0;
+      let count = 0;
+
+      for (let i = bars.length - 1; i >= 0; i--) {
+        const item = bars[i];
+        if (item.time < bucketTime) {
+          break;
+        }
+        if (item.time < bucketEnd) {
+          if (count === 0) {
+            close = item.close;
+          }
+          open = item.open;
+          if (item.high > high) high = item.high;
+          if (item.low < low) low = item.low;
+          volume += item.volume ?? 0;
+          count++;
+        }
+      }
+
+      if (count > 0) {
         updatedBar = {
           time: bucketTime,
-          open: bucketBars[0].open,
-          high: Math.max(...bucketBars.map((x) => x.high)),
-          low: Math.min(...bucketBars.map((x) => x.low)),
-          close: bucketBars[bucketBars.length - 1].close,
-          volume: bucketBars.reduce((acc, x) => acc + x.volume, 0),
+          open,
+          high,
+          low,
+          close,
+          volume,
         };
       } else {
         updatedBar = b;

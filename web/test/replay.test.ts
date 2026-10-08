@@ -300,3 +300,39 @@ test("panelModel: computes hindsight-free model across replay positions", () => 
   assert.equal(model2.stats.net_pnl, 10);
 });
 
+test("replay controller: getVisibleBars caching and out-of-order append", () => {
+  const bars = makeBars(5);
+  const controller = new ReplayController(bars, []);
+
+  // Check that repeated calls at the same cursor return the identical array reference (cached)
+  const v1 = controller.getVisibleBars();
+  const v2 = controller.getVisibleBars();
+  assert.equal(v1, v2);
+  assert.equal(v1.length, 5);
+
+  // Moving cursor invalidates cache and returns appropriate slice
+  controller.seek(2);
+  const v3 = controller.getVisibleBars();
+  assert.notEqual(v1, v3);
+  assert.equal(v3.length, 3);
+
+  // Calling again returns cached v3
+  const v4 = controller.getVisibleBars();
+  assert.equal(v3, v4);
+
+  // Appending an out-of-order bar updates correctly and preserves ordering
+  const earlierBar: Bar = {
+    time: bars[0].time + 10,
+    open: 100,
+    high: 105,
+    low: 95,
+    close: 101,
+    volume: 10,
+  };
+  controller.appendOrUpdateBar(earlierBar);
+  assert.equal(controller.getTotal(), 6);
+  assert.equal(controller.getVisibleBars()[1].time, earlierBar.time);
+
+  controller.destroy();
+});
+

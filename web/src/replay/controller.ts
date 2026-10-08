@@ -24,6 +24,36 @@ export interface ReplayState {
 export type FrameListener = (frame: ReplayFrame) => void;
 export type StateListener = (state: ReplayState) => void;
 
+function findBarIndex(bars: Bar[], time: number): number {
+  if (bars.length === 0) return -1;
+  const last = bars[bars.length - 1];
+  if (last.time === time) return bars.length - 1;
+  if (last.time < time) return -1;
+  let low = 0;
+  let high = bars.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    const midTime = bars[mid].time;
+    if (midTime === time) return mid;
+    if (midTime < time) low = mid + 1;
+    else high = mid - 1;
+  }
+  return -1;
+}
+
+function findBarInsertIndex(bars: Bar[], time: number): number {
+  if (bars.length === 0) return 0;
+  if (time > bars[bars.length - 1].time) return bars.length;
+  let low = 0;
+  let high = bars.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (bars[mid].time >= time) high = mid - 1;
+    else low = mid + 1;
+  }
+  return low;
+}
+
 export class ReplayController {
   private bars: Bar[] = [];
   private trades: Trade[] = [];
@@ -34,6 +64,11 @@ export class ReplayController {
   private timer: ReturnType<typeof setInterval> | null = null;
   private frameListeners = new Set<FrameListener>();
   private stateListeners = new Set<StateListener>();
+  private dataVersion = 0;
+  private cachedVisibleBars: Bar[] = [];
+  private cachedCursor = -1;
+  private cachedBarsLength = -1;
+  private cachedDataVersion = -1;
 
   constructor(bars: Bar[] = [], trades: Trade[] = [], signals: Signal[] = []) {
     this.setData(bars, trades, signals);
@@ -44,6 +79,7 @@ export class ReplayController {
     this.trades = trades;
     this.signals = signals;
     this.cursor = Math.max(0, bars.length - 1);
+    this.dataVersion++;
     this.emitState();
     this.emitFrame();
   }
@@ -63,33 +99,57 @@ export class ReplayController {
     if (this.bars.length === 0) {
       this.bars.push(bar);
       this.cursor = 0;
+      this.dataVersion++;
       this.emitState();
       this.emitFrame();
       return;
     }
 
     const wasLive = !this.isPlaying && (this.cursor >= this.bars.length - 2);
+    const lastBar = this.bars[this.bars.length - 1];
 
-    const existingIdx = this.bars.findIndex((b) => b.time === bar.time);
+    if (bar.time === lastBar.time) {
+      this.bars[this.bars.length - 1] = bar;
+      if (wasLive) {
+        this.cursor = this.bars.length - 1;
+      }
+      this.dataVersion++;
+      this.emitState();
+      this.emitFrame();
+      return;
+    }
+
+    if (bar.time > lastBar.time) {
+      this.bars.push(bar);
+      if (wasLive) {
+        this.cursor = this.bars.length - 1;
+      }
+      this.dataVersion++;
+      this.emitState();
+      this.emitFrame();
+      return;
+    }
+
+    const existingIdx = findBarIndex(this.bars, bar.time);
     if (existingIdx >= 0) {
       this.bars[existingIdx] = bar;
       if (wasLive) {
         this.cursor = this.bars.length - 1;
       }
+      this.dataVersion++;
       this.emitState();
       this.emitFrame();
       return;
     }
 
-    if (bar.time > this.bars[this.bars.length - 1].time) {
-      this.bars.push(bar);
-      if (wasLive) {
-        this.cursor = this.bars.length - 1;
-      }
-      this.emitState();
-      this.emitFrame();
-      return;
+    const insertIdx = findBarInsertIndex(this.bars, bar.time);
+    this.bars.splice(insertIdx, 0, bar);
+    if (wasLive) {
+      this.cursor = this.bars.length - 1;
     }
+    this.dataVersion++;
+    this.emitState();
+    this.emitFrame();
   }
 
   public updateTrades(trades: Trade[]): void {
@@ -154,7 +214,21 @@ export class ReplayController {
 
   public getVisibleBars(): Bar[] {
     if (this.bars.length === 0) return [];
-    return this.bars.slice(0, this.cursor + 1);
+    if (
+      this.cursor === this.cachedCursor &&
+      this.bars.length === this.cachedBarsLength &&
+      this.dataVersion === this.cachedDataVersion
+    ) {
+      return this.cachedVisibleBars;
+    }
+    this.cachedCursor = this.cursor;
+    this.cachedBarsLength = this.bars.length;
+    this.cachedDataVersion = this.dataVersion;
+    this.cachedVisibleBars =
+      this.cursor === this.bars.length - 1
+        ? this.bars.slice()
+        : this.bars.slice(0, this.cursor + 1);
+    return this.cachedVisibleBars;
   }
 
   public getVisibleTrades(): Trade[] {

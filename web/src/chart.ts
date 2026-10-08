@@ -341,6 +341,33 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
         return;
       }
 
+      // Forward steps in replay: up to 5 candles added consecutively
+      if (
+        bars.length > prevBars.length &&
+        bars.length <= prevBars.length + 5 &&
+        prevBars.length > 0 &&
+        prevBars[prevBars.length - 1].time === bars[prevBars.length - 1].time
+      ) {
+        for (let i = prevBars.length; i < bars.length; i++) {
+          const b = bars[i];
+          candles.update({
+            time: b.time as UTCTimestamp,
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+          });
+          volume.update({
+            time: b.time as UTCTimestamp,
+            value: b.volume,
+            color: b.close >= b.open ? hexToRgba(UP, 0.4) : hexToRgba(DOWN, 0.4),
+          });
+        }
+        drawings.render();
+        updateAriaLabel();
+        return;
+      }
+
       const timeScale = chart.timeScale();
       const prevRange = timeScale.getVisibleLogicalRange();
 

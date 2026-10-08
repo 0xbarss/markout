@@ -23,8 +23,24 @@ export function mountReplayBar(controller: ReplayController): ReplayBarHandle {
   prevBtn.addEventListener("click", () => controller.stepBackward());
   nextBtn.addEventListener("click", () => controller.stepForward());
   speedBtn.addEventListener("click", () => controller.cycleSpeed());
-  slider.addEventListener("input", () => controller.seek(Number(slider.value)));
-  slider.addEventListener("change", () => controller.seek(Number(slider.value)));
+  let seekRafId: number | null = null;
+  slider.addEventListener("input", () => {
+    const val = Number(slider.value);
+    if (seekRafId !== null) {
+      cancelAnimationFrame(seekRafId);
+    }
+    seekRafId = requestAnimationFrame(() => {
+      seekRafId = null;
+      controller.seek(val);
+    });
+  });
+  slider.addEventListener("change", () => {
+    if (seekRafId !== null) {
+      cancelAnimationFrame(seekRafId);
+      seekRafId = null;
+    }
+    controller.seek(Number(slider.value));
+  });
   liveBtn.addEventListener("click", () => controller.jumpToLive());
 
   // Keyboard shortcuts: Space (play/pause), ArrowLeft (step back), ArrowRight (step forward), R (reset)

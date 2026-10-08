@@ -21,7 +21,9 @@ use axum::{
 use rust_embed::RustEmbed;
 use serde_json::json;
 use tokio::sync::broadcast::{self, error::RecvError};
-use tower_http::{set_header::SetResponseHeaderLayer, trace::TraceLayer};
+use tower_http::{
+    compression::CompressionLayer, set_header::SetResponseHeaderLayer, trace::TraceLayer,
+};
 
 use crate::{
     config::{Config, Mode},
@@ -165,11 +167,53 @@ pub struct AppState {
     pub mode: &'static str,
     pub tf: Option<u64>,
     pub data: Arc<Dataset>,
+    pub bars_json: bytes::Bytes,
+    pub trades_json: bytes::Bytes,
+    pub signals_json: bytes::Bytes,
+    pub stats_json: bytes::Bytes,
     pub live_store: Option<Arc<tokio::sync::RwLock<LiveSnapshot>>>,
     pub host: String,
     pub allowed_hosts: Arc<HashSet<String>>,
     pub allowed_origins: Arc<Vec<String>>,
     pub allow_ws_publish: bool,
+}
+
+impl AppState {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        bus: EventBus,
+        mode: &'static str,
+        tf: Option<u64>,
+        data: Arc<Dataset>,
+        live_store: Option<Arc<tokio::sync::RwLock<LiveSnapshot>>>,
+        host: String,
+        allowed_hosts: Arc<HashSet<String>>,
+        allowed_origins: Arc<Vec<String>>,
+        allow_ws_publish: bool,
+    ) -> Self {
+        let bars_json = bytes::Bytes::from(serde_json::to_vec(&data.bars).unwrap_or_default());
+        let trades_json = bytes::Bytes::from(serde_json::to_vec(&data.trades).unwrap_or_default());
+        let signals_json =
+            bytes::Bytes::from(serde_json::to_vec(&data.signals).unwrap_or_default());
+        let stats_json = bytes::Bytes::from(
+            serde_json::to_vec(&stats::compute(&data.trades)).unwrap_or_default(),
+        );
+        Self {
+            bus,
+            mode,
+            tf,
+            data,
+            bars_json,
+            trades_json,
+            signals_json,
+            stats_json,
+            live_store,
+            host,
+            allowed_hosts,
+            allowed_origins,
+            allow_ws_publish,
+        }
+    }
 }
 
 pub fn router(state: AppState) -> Router {
@@ -186,6 +230,7 @@ pub fn router(state: AppState) -> Router {
         .route("/ws/stream", get(ws_stream))
         .fallback(static_handler)
         .layer(TraceLayer::new_for_http())
+        .layer(CompressionLayer::new())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_allowed_host,
@@ -346,17 +391,17 @@ pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result
         _ => None,
     };
 
-    let state = AppState {
+    let state = AppState::new(
         bus,
-        mode: config.mode.name(),
+        config.mode.name(),
         tf,
-        data: Arc::new(data),
+        Arc::new(data),
         live_store,
-        host: config.host.clone(),
-        allowed_hosts: Arc::new(allowed_hosts),
-        allowed_origins: Arc::new(config.allow_origins),
-        allow_ws_publish: config.allow_ws_publish,
-    };
+        config.host.clone(),
+        Arc::new(allowed_hosts),
+        Arc::new(config.allow_origins),
+        config.allow_ws_publish,
+    );
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(
         "markout ({}) listening on http://{}",
@@ -386,35 +431,51 @@ async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(payload)
 }
 
-async fn get_bars(State(state): State<AppState>) -> Json<Vec<Bar>> {
+async fn get_bars(State(state): State<AppState>) -> Response {
     if let Some(store) = &state.live_store {
-        Json(store.read().await.bars())
+        Json(store.read().await.bars()).into_response()
     } else {
-        Json(state.data.bars.clone())
+        (
+            [(header::CONTENT_TYPE, "application/json")],
+            state.bars_json.clone(),
+        )
+            .into_response()
     }
 }
 
-async fn get_trades(State(state): State<AppState>) -> Json<Vec<Trade>> {
+async fn get_trades(State(state): State<AppState>) -> Response {
     if let Some(store) = &state.live_store {
-        Json(store.read().await.trades())
+        Json(store.read().await.trades()).into_response()
     } else {
-        Json(state.data.trades.clone())
+        (
+            [(header::CONTENT_TYPE, "application/json")],
+            state.trades_json.clone(),
+        )
+            .into_response()
     }
 }
 
-async fn get_signals(State(state): State<AppState>) -> Json<Vec<Signal>> {
+async fn get_signals(State(state): State<AppState>) -> Response {
     if let Some(store) = &state.live_store {
-        Json(store.read().await.signals())
+        Json(store.read().await.signals()).into_response()
     } else {
-        Json(state.data.signals.clone())
+        (
+            [(header::CONTENT_TYPE, "application/json")],
+            state.signals_json.clone(),
+        )
+            .into_response()
     }
 }
 
-async fn get_stats(State(state): State<AppState>) -> Json<Stats> {
+async fn get_stats(State(state): State<AppState>) -> Response {
     if let Some(store) = &state.live_store {
-        Json(store.read().await.stats())
+        Json(store.read().await.stats()).into_response()
     } else {
-        Json(stats::compute(&state.data.trades))
+        (
+            [(header::CONTENT_TYPE, "application/json")],
+            state.stats_json.clone(),
+        )
+            .into_response()
     }
 }
 
@@ -555,17 +616,17 @@ mod tests {
         allow_ws_publish: bool,
     ) -> (Router, EventBus) {
         let bus = EventBus::default();
-        let state = AppState {
-            bus: bus.clone(),
-            mode: "offline",
-            tf: None,
-            data: Arc::new(data),
-            live_store: None,
-            host: "127.0.0.1".into(),
-            allowed_hosts: Arc::new(allowed_hosts.iter().map(|s| s.to_string()).collect()),
-            allowed_origins: Arc::new(allowed_origins.iter().map(|s| s.to_string()).collect()),
+        let state = AppState::new(
+            bus.clone(),
+            "offline",
+            None,
+            Arc::new(data),
+            None,
+            "127.0.0.1".into(),
+            Arc::new(allowed_hosts.iter().map(|s| s.to_string()).collect()),
+            Arc::new(allowed_origins.iter().map(|s| s.to_string()).collect()),
             allow_ws_publish,
-        };
+        );
         (router(state), bus)
     }
 
@@ -595,17 +656,17 @@ mod tests {
     #[tokio::test]
     async fn health_live_with_timeframe_returns_tf() {
         let bus = EventBus::default();
-        let state = AppState {
+        let state = AppState::new(
             bus,
-            mode: "live",
-            tf: Some(900),
-            data: Arc::new(Dataset::default()),
-            live_store: None,
-            host: "127.0.0.1".into(),
-            allowed_hosts: Arc::new(HashSet::new()),
-            allowed_origins: Arc::new(Vec::new()),
-            allow_ws_publish: false,
-        };
+            "live",
+            Some(900),
+            Arc::new(Dataset::default()),
+            None,
+            "127.0.0.1".into(),
+            Arc::new(HashSet::new()),
+            Arc::new(Vec::new()),
+            false,
+        );
         let res = router(state)
             .oneshot(
                 Request::builder()
@@ -1137,17 +1198,17 @@ mod tests {
             }
         });
 
-        let state = AppState {
-            bus: bus.clone(),
-            mode: "live",
-            tf: Some(60),
-            data: Arc::new(Dataset::default()),
-            live_store: Some(store),
-            host: "127.0.0.1".into(),
-            allowed_hosts: Arc::new(HashSet::new()),
-            allowed_origins: Arc::new(Vec::new()),
-            allow_ws_publish: false,
-        };
+        let state = AppState::new(
+            bus.clone(),
+            "live",
+            Some(60),
+            Arc::new(Dataset::default()),
+            Some(store),
+            "127.0.0.1".into(),
+            Arc::new(HashSet::new()),
+            Arc::new(Vec::new()),
+            false,
+        );
         let app = router(state);
 
         // Publish 3 bars
@@ -1349,5 +1410,49 @@ mod tests {
         // Snapshot retains all 3 bars
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         assert_eq!(store.read().await.bars().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn gzip_compression_on_accept_encoding() {
+        use std::io::Read;
+        let bar = Bar {
+            time: 1_700_000_000,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: 3.0,
+        };
+        let app = app_with(Dataset {
+            bars: vec![bar],
+            trades: vec![],
+            signals: vec![],
+        });
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/bars")
+                    .header(header::HOST, "127.0.0.1")
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers()
+                .get(header::CONTENT_ENCODING)
+                .and_then(|v| v.to_str().ok()),
+            Some("gzip")
+        );
+        let compressed = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let mut decoder = flate2::read::GzDecoder::new(&compressed[..]);
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).unwrap();
+        let bars: Vec<Bar> = serde_json::from_slice(&decompressed).unwrap();
+        assert_eq!(bars, vec![bar]);
     }
 }
