@@ -101,4 +101,74 @@ mod tests {
         assert!((s.win_rate - 1.0 / 3.0).abs() < 1e-12);
         assert_eq!(s.total_fees, 3.0);
     }
+
+    #[derive(Deserialize)]
+    struct StatsTestCase {
+        name: String,
+        trades: Vec<Trade>,
+        expected: Stats,
+    }
+
+    #[test]
+    fn cross_language_stats_parity_fixtures() {
+        let fixture_data = include_str!("../tests/fixtures/stats_cases.json");
+        let cases: Vec<StatsTestCase> = serde_json::from_str(fixture_data).unwrap();
+        assert!(!cases.is_empty());
+
+        for tc in cases {
+            let actual = compute(&tc.trades);
+            assert_eq!(
+                actual.total_trades, tc.expected.total_trades,
+                "{}: total_trades",
+                tc.name
+            );
+            assert_eq!(
+                actual.open_trades, tc.expected.open_trades,
+                "{}: open_trades",
+                tc.name
+            );
+            assert_eq!(
+                actual.closed_trades, tc.expected.closed_trades,
+                "{}: closed_trades",
+                tc.name
+            );
+            assert_eq!(actual.wins, tc.expected.wins, "{}: wins", tc.name);
+            assert_eq!(actual.losses, tc.expected.losses, "{}: losses", tc.name);
+            assert!(
+                (actual.win_rate - tc.expected.win_rate).abs() < 1e-9,
+                "{}: win_rate expected {} got {}",
+                tc.name,
+                tc.expected.win_rate,
+                actual.win_rate
+            );
+            assert!(
+                (actual.net_pnl - tc.expected.net_pnl).abs() < 1e-9,
+                "{}: net_pnl expected {} got {}",
+                tc.name,
+                tc.expected.net_pnl,
+                actual.net_pnl
+            );
+            assert!(
+                (actual.total_fees - tc.expected.total_fees).abs() < 1e-9,
+                "{}: total_fees expected {} got {}",
+                tc.name,
+                tc.expected.total_fees,
+                actual.total_fees
+            );
+            assert!(
+                (actual.avg_r - tc.expected.avg_r).abs() < 1e-9,
+                "{}: avg_r expected {} got {}",
+                tc.name,
+                tc.expected.avg_r,
+                actual.avg_r
+            );
+            assert!(
+                (actual.max_drawdown - tc.expected.max_drawdown).abs() < 1e-9,
+                "{}: max_drawdown expected {} got {}",
+                tc.name,
+                tc.expected.max_drawdown,
+                actual.max_drawdown
+            );
+        }
+    }
 }

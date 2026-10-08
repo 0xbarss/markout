@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { computeStats } from "../src/stats.ts";
-import type { Trade } from "../src/types.ts";
+import type { Stats, Trade } from "../src/types.ts";
 
 const makeTrade = (over: Partial<Trade> = {}): Trade => ({
   id: 1,
@@ -53,4 +54,45 @@ test("computeStats: correctly calculates pnl, win rate, and drawdown", () => {
   assert.equal(s.max_drawdown, 130);
   assert.equal(s.total_fees, 6);
   assert.ok(Math.abs(s.win_rate - 1 / 3) < 1e-6);
+});
+
+interface StatsTestCase {
+  name: string;
+  trades: Trade[];
+  expected: Stats;
+}
+
+test("computeStats: cross-language stats parity fixtures", () => {
+  const raw = readFileSync(new URL("../../tests/fixtures/stats_cases.json", import.meta.url), "utf-8");
+  const cases = JSON.parse(raw) as StatsTestCase[];
+  assert.ok(cases.length > 0);
+
+  for (const tc of cases) {
+    const actual = computeStats(tc.trades);
+    assert.equal(actual.total_trades, tc.expected.total_trades, `${tc.name}: total_trades`);
+    assert.equal(actual.open_trades, tc.expected.open_trades, `${tc.name}: open_trades`);
+    assert.equal(actual.closed_trades, tc.expected.closed_trades, `${tc.name}: closed_trades`);
+    assert.equal(actual.wins, tc.expected.wins, `${tc.name}: wins`);
+    assert.equal(actual.losses, tc.expected.losses, `${tc.name}: losses`);
+    assert.ok(
+      Math.abs(actual.win_rate - tc.expected.win_rate) < 1e-9,
+      `${tc.name}: win_rate expected ${tc.expected.win_rate} got ${actual.win_rate}`,
+    );
+    assert.ok(
+      Math.abs(actual.net_pnl - tc.expected.net_pnl) < 1e-9,
+      `${tc.name}: net_pnl expected ${tc.expected.net_pnl} got ${actual.net_pnl}`,
+    );
+    assert.ok(
+      Math.abs(actual.total_fees - tc.expected.total_fees) < 1e-9,
+      `${tc.name}: total_fees expected ${tc.expected.total_fees} got ${actual.total_fees}`,
+    );
+    assert.ok(
+      Math.abs(actual.avg_r - tc.expected.avg_r) < 1e-9,
+      `${tc.name}: avg_r expected ${tc.expected.avg_r} got ${actual.avg_r}`,
+    );
+    assert.ok(
+      Math.abs(actual.max_drawdown - tc.expected.max_drawdown) < 1e-9,
+      `${tc.name}: max_drawdown expected ${tc.expected.max_drawdown} got ${actual.max_drawdown}`,
+    );
+  }
 });
