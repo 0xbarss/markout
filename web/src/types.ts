@@ -19,6 +19,7 @@ export interface Stats {
   total_trades: number; open_trades: number; closed_trades: number;
   wins: number; losses: number; win_rate: number;
   net_pnl: number; total_fees: number; avg_r: number; max_drawdown: number;
+  profit_factor: number | null;
 }
 
 export interface Tick {

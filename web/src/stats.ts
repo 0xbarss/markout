@@ -12,14 +12,21 @@ export function computeStats(trades: Trade[]): Stats {
   let netPnl = 0;
   let totalFees = 0;
   let sumR = 0;
+  let grossWin = 0;
+  let grossLoss = 0;
 
   for (const t of closed) {
     cum += t.pnl;
     if (cum > peak) peak = cum;
     const dd = peak - cum;
     if (dd > maxDd) maxDd = dd;
-    if (t.pnl > 0) wins++;
-    else if (t.pnl < 0) losses++;
+    if (t.pnl > 0) {
+      wins++;
+      grossWin += t.pnl;
+    } else if (t.pnl < 0) {
+      losses++;
+      grossLoss += -t.pnl;
+    }
     netPnl += t.pnl;
     totalFees += t.fee;
     sumR += t.r_multiple;
@@ -36,5 +43,6 @@ export function computeStats(trades: Trade[]): Stats {
     total_fees: totalFees,
     avg_r: n > 0 ? sumR / n : 0,
     max_drawdown: maxDd,
+    profit_factor: grossLoss > 0 ? grossWin / grossLoss : null,
   };
 }

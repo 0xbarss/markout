@@ -132,9 +132,15 @@ export function renderStats(s: Stats, trades: Trade[] = []): void {
     avgMfeStr = `${fmtSigned(avgMfe, 2)}%`;
   }
 
+  // Profit Factor
+  const pfStr = s.profit_factor !== null
+    ? fmt(s.profit_factor, 2)
+    : (s.closed_trades > 0 && s.wins > 0 ? "∞" : "—");
+
   // Rows for DL list
   const rows: [string, string, string][] = [
     ["Win Rate", s.closed_trades ? `${fmt(s.win_rate * 100, 1)}%` : "—", ""],
+    ["Profit Factor", pfStr, ""],
     ["Avg R", s.closed_trades ? fmtSigned(s.avg_r, 2) : "—", signClass(s.avg_r)],
     ["Max DD", s.max_drawdown ? `$${fmt(s.max_drawdown)}` : "—", s.max_drawdown ? "down" : ""],
     ["Avg MAE", avgMaeStr, avgMaeStr !== "—" ? "down" : ""],

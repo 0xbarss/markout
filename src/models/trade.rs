@@ -50,6 +50,7 @@ pub struct Trade {
     #[serde(default)]
     pub sl_history: Vec<StopPoint>,
 
+    /// Net realized PnL after fees; `fee` is informational.
     pub pnl: f64,
     pub r_multiple: f64,
     #[serde(default)]

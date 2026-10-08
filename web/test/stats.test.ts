@@ -34,6 +34,7 @@ test("computeStats: empty trades list returns zeros", () => {
   assert.equal(s.win_rate, 0);
   assert.equal(s.avg_r, 0);
   assert.equal(s.max_drawdown, 0);
+  assert.equal(s.profit_factor, null);
 });
 
 test("computeStats: correctly calculates pnl, win rate, and drawdown", () => {
@@ -54,6 +55,7 @@ test("computeStats: correctly calculates pnl, win rate, and drawdown", () => {
   assert.equal(s.max_drawdown, 130);
   assert.equal(s.total_fees, 6);
   assert.ok(Math.abs(s.win_rate - 1 / 3) < 1e-6);
+  assert.ok(s.profit_factor !== null && Math.abs(s.profit_factor - 100 / 130) < 1e-9);
 });
 
 interface StatsTestCase {
@@ -94,5 +96,14 @@ test("computeStats: cross-language stats parity fixtures", () => {
       Math.abs(actual.max_drawdown - tc.expected.max_drawdown) < 1e-9,
       `${tc.name}: max_drawdown expected ${tc.expected.max_drawdown} got ${actual.max_drawdown}`,
     );
+    if (tc.expected.profit_factor === null) {
+      assert.equal(actual.profit_factor, null, `${tc.name}: profit_factor expected null`);
+    } else {
+      assert.ok(actual.profit_factor !== null, `${tc.name}: profit_factor expected non-null`);
+      assert.ok(
+        Math.abs(actual.profit_factor - tc.expected.profit_factor) < 1e-9,
+        `${tc.name}: profit_factor expected ${tc.expected.profit_factor} got ${actual.profit_factor}`,
+      );
+    }
   }
 });

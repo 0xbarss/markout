@@ -11,14 +11,17 @@ pub struct Stats {
     pub closed_trades: usize,
     pub wins: usize,
     pub losses: usize,
-    /// Fraction of closed trades with positive PnL, in 0.0..=1.0.
+    /// Fraction of closed trades with positive PnL (pnl > 0), in 0.0..=1.0.
+    /// Breakeven trades (pnl == 0) are in neither wins nor losses, so win_rate + loss_rate <= 1.0.
     pub win_rate: f64,
-    /// Sum of realized PnL over closed trades (fees reported separately).
+    /// Sum of net realized PnL over closed trades (after fees).
     pub net_pnl: f64,
     pub total_fees: f64,
     pub avg_r: f64,
     /// Largest peak-to-trough drop of cumulative realized PnL, in currency units.
     pub max_drawdown: f64,
+    /// Gross profit / gross loss over closed trades; None when there are no losing trades.
+    pub profit_factor: Option<f64>,
 }
 
 pub fn compute(trades: &[Trade]) -> Stats {
@@ -34,6 +37,13 @@ pub fn compute(trades: &[Trade]) -> Stats {
     }
     let wins = closed.iter().filter(|t| t.pnl > 0.0).count();
     let losses = closed.iter().filter(|t| t.pnl < 0.0).count();
+    let gross_win: f64 = closed.iter().filter(|t| t.pnl > 0.0).map(|t| t.pnl).sum();
+    let gross_loss: f64 = closed.iter().filter(|t| t.pnl < 0.0).map(|t| -t.pnl).sum();
+    let profit_factor = if gross_loss > 0.0 {
+        Some(gross_win / gross_loss)
+    } else {
+        None
+    };
 
     Stats {
         total_trades: trades.len(),
@@ -50,6 +60,7 @@ pub fn compute(trades: &[Trade]) -> Stats {
             0.0
         },
         max_drawdown: max_dd,
+        profit_factor,
     }
 }
 
@@ -100,6 +111,7 @@ mod tests {
         assert_eq!(s.max_drawdown, 130.0);
         assert!((s.win_rate - 1.0 / 3.0).abs() < 1e-12);
         assert_eq!(s.total_fees, 3.0);
+        assert_eq!(s.profit_factor, Some(100.0 / 130.0));
     }
 
     #[derive(Deserialize)]
@@ -169,6 +181,20 @@ mod tests {
                 tc.expected.max_drawdown,
                 actual.max_drawdown
             );
+            match (actual.profit_factor, tc.expected.profit_factor) {
+                (Some(a), Some(e)) => assert!(
+                    (a - e).abs() < 1e-9,
+                    "{}: profit_factor expected {} got {}",
+                    tc.name,
+                    e,
+                    a
+                ),
+                (None, None) => {}
+                _ => panic!(
+                    "{}: profit_factor mismatch: actual {:?}, expected {:?}",
+                    tc.name, actual.profit_factor, tc.expected.profit_factor
+                ),
+            }
         }
     }
 }
