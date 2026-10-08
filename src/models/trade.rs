@@ -24,6 +24,7 @@ pub enum ExitReason {
 /// One step of the trailing stop-loss path.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StopPoint {
+    #[serde(deserialize_with = "crate::models::de_time")]
     pub time: i64,
     pub price: f64,
 }
@@ -35,9 +36,11 @@ pub struct Trade {
     pub direction: TradeSide,
     pub size: f64,
 
+    #[serde(deserialize_with = "crate::models::de_time")]
     pub entry_time: i64,
     pub entry_price: f64,
 
+    #[serde(default, deserialize_with = "crate::models::de_opt_time")]
     pub exit_time: Option<i64>,
     pub exit_price: Option<f64>,
     pub exit_reason: Option<ExitReason>,
@@ -75,6 +78,7 @@ pub struct TradeUpdate {
 /// Account equity and balance snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AccountSnapshot {
+    #[serde(deserialize_with = "crate::models::de_time")]
     pub time: i64,
     pub balance: f64,
     pub equity: f64,

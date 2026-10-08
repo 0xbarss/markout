@@ -47,9 +47,10 @@ struct TradeRow {
     symbol: String,
     direction: TradeSide,
     size: f64,
+    #[serde(deserialize_with = "crate::models::de_time")]
     entry_time: i64,
     entry_price: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::models::de_opt_time")]
     exit_time: Option<i64>,
     #[serde(default)]
     exit_price: Option<f64>,
@@ -63,7 +64,7 @@ struct TradeRow {
     pnl: f64,
     r_multiple: f64,
     #[serde(default)]
-    fee: f64,
+    fee: Option<f64>,
     #[serde(default)]
     mae_pct: Option<f64>,
     #[serde(default)]
@@ -101,7 +102,7 @@ pub fn parse_trades_csv<R: Read>(reader: R) -> Result<Vec<Trade>> {
             sl_history,
             pnl: r.pnl,
             r_multiple: r.r_multiple,
-            fee: r.fee,
+            fee: r.fee.unwrap_or(0.0),
             mae_pct: r.mae_pct,
             mfe_pct: r.mfe_pct,
         });
@@ -173,5 +174,20 @@ mod tests {
             parse_jsonl(input.as_bytes()),
             Err(IngestError::InvalidTrade { .. })
         ));
+    }
+
+    #[test]
+    fn float_entry_time_in_jsonl() {
+        let line = LINE.replace("\"entry_time\":1700000000", "\"entry_time\":1700000000.5");
+        let trades = parse_jsonl(line.as_bytes()).unwrap();
+        assert_eq!(trades[0].entry_time, 1_700_000_000);
+    }
+
+    #[test]
+    fn csv_empty_fee_cell() {
+        let csv = "id,symbol,direction,size,entry_time,entry_price,exit_time,exit_price,exit_reason,initial_sl,take_profit,sl_history,pnl,r_multiple,fee\n\
+                   1,ETHUSDT,buy,1,1700000000,3420,,,,3400,,,0,0,\n";
+        let trades = parse_trades_csv(csv.as_bytes()).unwrap();
+        assert_eq!(trades[0].fee, 0.0);
     }
 }

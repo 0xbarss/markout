@@ -45,6 +45,12 @@ pub enum IngestError {
     InvalidTrade { id: String, reason: String },
     #[error("invalid signal {id}: {reason}")]
     InvalidSignal { id: String, reason: String },
+    #[error("{path}: {source}")]
+    InFile {
+        path: String,
+        #[source]
+        source: Box<IngestError>,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, IngestError>;
@@ -63,23 +69,7 @@ pub(crate) fn extension(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
-/// Timestamps at or above this magnitude are assumed to be milliseconds/microseconds/nanoseconds.
-const MILLIS_THRESHOLD: i64 = 100_000_000_000;
-const MICROS_THRESHOLD: i64 = 100_000_000_000_000;
-const NANOS_THRESHOLD: i64 = 100_000_000_000_000_000;
-
-/// Convert a possibly millisecond, microsecond, or nanosecond Unix timestamp to seconds.
-pub fn normalize_time(t: i64) -> i64 {
-    if t.abs() >= NANOS_THRESHOLD {
-        t / 1_000_000_000
-    } else if t.abs() >= MICROS_THRESHOLD {
-        t / 1_000_000
-    } else if t.abs() >= MILLIS_THRESHOLD {
-        t / 1000
-    } else {
-        t
-    }
-}
+pub use crate::models::{normalize_time, parse_time_str};
 
 pub fn is_parquet_format(path: &Path) -> bool {
     extension(path) == "parquet"

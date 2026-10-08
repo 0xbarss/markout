@@ -47,10 +47,26 @@ pub fn load(path: &Path) -> Result<Vec<Signal>> {
 }
 
 pub fn finish_signals(mut signals: Vec<Signal>) -> Result<Vec<Signal>> {
+    let mut seen = HashSet::new();
+    for s in &signals {
+        if !s.id.is_empty() && !seen.insert(s.id.clone()) {
+            return Err(IngestError::InvalidSignal {
+                id: s.id.clone(),
+                reason: "duplicate signal id".into(),
+            });
+        }
+    }
     for (i, s) in signals.iter_mut().enumerate() {
         s.time = normalize_time(s.time);
         if s.id.is_empty() {
-            s.id = format!("sig_{}", i + 1);
+            let mut n = i + 1;
+            let mut candidate = format!("sig_{n}");
+            while seen.contains(&candidate) {
+                n += 1;
+                candidate = format!("sig_{n}");
+            }
+            seen.insert(candidate.clone());
+            s.id = candidate;
         }
     }
     signals.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| a.id.cmp(&b.id)));
@@ -70,26 +86,22 @@ pub fn parse_jsonl<R: BufRead>(reader: R) -> Result<Vec<Signal>> {
                 id: format!("signal line {}", i + 1),
                 reason: e.to_string(),
             })?;
-        out.push(sig.into_signal(i + 1));
+        out.push(sig.into_signal());
     }
     finish_signals(out)
 }
 
 pub fn parse_json_array<R: Read>(reader: R) -> Result<Vec<Signal>> {
     let raw: Vec<SignalRaw> = serde_json::from_reader(reader)?;
-    let signals = raw
-        .into_iter()
-        .enumerate()
-        .map(|(i, r)| r.into_signal(i + 1))
-        .collect();
+    let signals = raw.into_iter().map(|r| r.into_signal()).collect();
     finish_signals(signals)
 }
 
 #[derive(Deserialize)]
 struct SignalRaw {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::models::de_opt_id")]
     id: Option<String>,
-    #[serde(alias = "timestamp")]
+    #[serde(alias = "timestamp", deserialize_with = "crate::models::de_time")]
     time: i64,
     #[serde(default)]
     symbol: Option<String>,
@@ -98,9 +110,9 @@ struct SignalRaw {
     #[serde(alias = "price")]
     entry_price: f64,
     #[serde(default, alias = "sl", alias = "initial_sl")]
-    stop_loss: f64,
+    stop_loss: Option<f64>,
     #[serde(default, alias = "tp")]
-    take_profit: f64,
+    take_profit: Option<f64>,
     #[serde(default, alias = "name")]
     strategy: Option<String>,
     #[serde(default, alias = "note")]
@@ -108,15 +120,15 @@ struct SignalRaw {
 }
 
 impl SignalRaw {
-    fn into_signal(self, idx: usize) -> Signal {
+    fn into_signal(self) -> Signal {
         Signal {
-            id: self.id.unwrap_or_else(|| format!("sig_{idx}")),
+            id: self.id.unwrap_or_default(),
             time: self.time,
             symbol: self.symbol,
             direction: self.direction,
             entry_price: self.entry_price,
-            stop_loss: self.stop_loss,
-            take_profit: self.take_profit,
+            stop_loss: self.stop_loss.unwrap_or(0.0),
+            take_profit: self.take_profit.unwrap_or(0.0),
             strategy: self.strategy,
             comment: self.comment,
         }
@@ -130,9 +142,9 @@ pub fn parse_csv<R: Read>(reader: R) -> Result<Vec<Signal>> {
         .from_reader(reader);
 
     let mut out = Vec::new();
-    for (i, rec) in rdr.deserialize().enumerate() {
+    for rec in rdr.deserialize() {
         let raw: SignalRaw = rec?;
-        out.push(raw.into_signal(i + 1));
+        out.push(raw.into_signal());
     }
     finish_signals(out)
 }
@@ -407,6 +419,36 @@ mod tests {
                 assert!(reason.contains("direction `banana`"));
             }
             other => panic!("expected InvalidSignal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn jsonl_numeric_id_and_null_sl() {
+        let jsonl = r#"{"id": 5, "time": 1700000000, "direction": "buy", "entry_price": 100.0, "stop_loss": null}"#;
+        let sigs = parse_jsonl(jsonl.as_bytes()).unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0].id, "5");
+        assert_eq!(sigs[0].stop_loss, 0.0);
+    }
+
+    #[test]
+    fn csv_empty_take_profit() {
+        let csv = "time,direction,entry_price,stop_loss,take_profit\n1700000000,buy,100.0,95.0,\n";
+        let sigs = parse_csv(csv.as_bytes()).unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0].take_profit, 0.0);
+    }
+
+    #[test]
+    fn duplicate_signal_ids_rejected() {
+        let jsonl = "{\"id\": \"sig_2\", \"time\": 1700000000, \"direction\": \"buy\", \"entry_price\": 100.0}\n\
+                     {\"id\": \"sig_2\", \"time\": 1700000060, \"direction\": \"sell\", \"entry_price\": 105.0}\n";
+        match parse_jsonl(jsonl.as_bytes()) {
+            Err(IngestError::InvalidSignal { id, reason }) => {
+                assert_eq!(id, "sig_2");
+                assert!(reason.contains("duplicate signal id"));
+            }
+            other => panic!("expected duplicate signal id error, got {other:?}"),
         }
     }
 }

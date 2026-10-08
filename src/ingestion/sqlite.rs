@@ -57,6 +57,19 @@ pub fn has_table(conn: &Connection, table: &str) -> Result<bool> {
     Ok(!columns(conn, table)?.is_empty())
 }
 
+fn time_from_value(v: rusqlite::types::ValueRef<'_>) -> Option<i64> {
+    use rusqlite::types::ValueRef::*;
+    match v {
+        Integer(i) => Some(normalize_time(i)),
+        Real(f) if f.is_finite() => Some(normalize_time(f as i64)),
+        Text(t) => {
+            let s = std::str::from_utf8(t).ok()?;
+            crate::models::parse_time_str(s)
+        }
+        _ => None,
+    }
+}
+
 pub fn read_bars(conn: &Connection) -> Result<Vec<Bar>> {
     let cols = columns(conn, "bars")?;
     if cols.is_empty() {
@@ -70,101 +83,52 @@ pub fn read_bars(conn: &Connection) -> Result<Vec<Bar>> {
             });
         }
     }
-    let mut stmt =
-        conn.prepare("SELECT time, open, high, low, close, volume FROM bars ORDER BY time")?;
-    let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, i64>(0)?,
-            r.get::<_, f64>(1)?,
-            r.get::<_, f64>(2)?,
-            r.get::<_, f64>(3)?,
-            r.get::<_, f64>(4)?,
-            r.get::<_, f64>(5)?,
-        ))
-    })?;
-
+    let mut stmt = conn.prepare("SELECT time, open, high, low, close, volume FROM bars")?;
+    let mut rows = stmt.query([])?;
     let mut bars = Vec::new();
-    for (i, row) in rows.enumerate() {
-        let (time, open, high, low, close, volume) = row?;
+    let mut row_idx = 0;
+    while let Some(r) = rows.next()? {
+        row_idx += 1;
+        let time = time_from_value(r.get_ref(0)?).ok_or_else(|| IngestError::InvalidBar {
+            row: row_idx,
+            reason: "invalid or missing timestamp".into(),
+        })?;
+        let open: f64 = r.get(1).map_err(|e| IngestError::InvalidBar {
+            row: row_idx,
+            reason: e.to_string(),
+        })?;
+        let high: f64 = r.get(2).map_err(|e| IngestError::InvalidBar {
+            row: row_idx,
+            reason: e.to_string(),
+        })?;
+        let low: f64 = r.get(3).map_err(|e| IngestError::InvalidBar {
+            row: row_idx,
+            reason: e.to_string(),
+        })?;
+        let close: f64 = r.get(4).map_err(|e| IngestError::InvalidBar {
+            row: row_idx,
+            reason: e.to_string(),
+        })?;
+        let volume: f64 = r.get(5).map_err(|e| IngestError::InvalidBar {
+            row: row_idx,
+            reason: e.to_string(),
+        })?;
+
         let bar = Bar {
-            time: normalize_time(time),
+            time,
             open,
             high,
             low,
             close,
             volume,
         };
-        validate_bar(&bar).map_err(|reason| IngestError::InvalidBar { row: i + 1, reason })?;
+        validate_bar(&bar).map_err(|reason| IngestError::InvalidBar {
+            row: row_idx,
+            reason,
+        })?;
         bars.push(bar);
     }
     normalize_bars(bars)
-}
-
-struct RawTrade {
-    id: i64,
-    symbol: String,
-    direction: String,
-    size: f64,
-    entry_time: i64,
-    entry_price: f64,
-    initial_sl: f64,
-    pnl: f64,
-    r_multiple: f64,
-    exit_time: Option<i64>,
-    exit_price: Option<f64>,
-    exit_reason: Option<String>,
-    take_profit: Option<f64>,
-    sl_history: Option<String>,
-    fee: Option<f64>,
-    mae_pct: Option<f64>,
-    mfe_pct: Option<f64>,
-}
-
-fn into_trade(r: RawTrade) -> Result<Trade> {
-    let id = u64::try_from(r.id).map_err(|_| IngestError::InvalidTrade {
-        id: r.id.to_string(),
-        reason: "negative id".into(),
-    })?;
-    let bad = |reason: String| IngestError::InvalidTrade {
-        id: id.to_string(),
-        reason,
-    };
-
-    let direction: TradeSide =
-        parse_enum(&r.direction).map_err(|e| bad(format!("direction `{}`: {e}", r.direction)))?;
-    let exit_reason: Option<ExitReason> = r
-        .exit_reason
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .map(parse_enum::<ExitReason>)
-        .transpose()
-        .map_err(|e| bad(format!("exit_reason: {e}")))?;
-    let sl_history: Vec<StopPoint> = match r.sl_history.as_deref() {
-        Some(s) if !s.trim().is_empty() => {
-            serde_json::from_str(s).map_err(|e| bad(format!("sl_history: {e}")))?
-        }
-        _ => Vec::new(),
-    };
-
-    Ok(Trade {
-        id,
-        symbol: r.symbol,
-        direction,
-        size: r.size,
-        entry_time: r.entry_time,
-        entry_price: r.entry_price,
-        exit_time: r.exit_time,
-        exit_price: r.exit_price,
-        exit_reason,
-        initial_sl: r.initial_sl,
-        take_profit: r.take_profit,
-        sl_history,
-        pnl: r.pnl,
-        r_multiple: r.r_multiple,
-        fee: r.fee.unwrap_or(0.0),
-        mae_pct: r.mae_pct,
-        mfe_pct: r.mfe_pct,
-    })
 }
 
 pub fn read_trades(conn: &Connection) -> Result<Vec<Trade>> {
@@ -194,32 +158,240 @@ pub fn read_trades(conn: &Connection) -> Result<Vec<Trade>> {
         .collect::<Vec<_>>()
         .join(", ");
 
-    let mut stmt = conn.prepare(&format!("SELECT {select} FROM trades"))?;
-    let rows = stmt.query_map([], |r| {
-        Ok(RawTrade {
-            id: r.get(0)?,
-            symbol: r.get(1)?,
-            direction: r.get(2)?,
-            size: r.get(3)?,
-            entry_time: r.get(4)?,
-            entry_price: r.get(5)?,
-            initial_sl: r.get(6)?,
-            pnl: r.get(7)?,
-            r_multiple: r.get(8)?,
-            exit_time: r.get(9)?,
-            exit_price: r.get(10)?,
-            exit_reason: r.get(11)?,
-            take_profit: r.get(12)?,
-            sl_history: r.get(13)?,
-            fee: r.get(14)?,
-            mae_pct: r.get(15)?,
-            mfe_pct: r.get(16)?,
-        })
-    })?;
-
+    let mut stmt = conn.prepare(&format!("SELECT rowid, {select} FROM trades"))?;
+    let mut rows = stmt.query([])?;
     let mut trades = Vec::new();
-    for row in rows {
-        trades.push(into_trade(row?)?);
+    let mut fallback_row = 0;
+
+    while let Some(r) = rows.next()? {
+        fallback_row += 1;
+        let rowid: i64 = r.get::<_, i64>(0).unwrap_or(fallback_row);
+
+        let id_val = r.get_ref(1)?;
+        let trade_id_str = match id_val {
+            rusqlite::types::ValueRef::Integer(i) => i.to_string(),
+            rusqlite::types::ValueRef::Real(f) => f.to_string(),
+            rusqlite::types::ValueRef::Text(t) => String::from_utf8_lossy(t).into_owned(),
+            _ => rowid.to_string(),
+        };
+
+        let id_raw: i64 = match id_val {
+            rusqlite::types::ValueRef::Integer(i) => i,
+            rusqlite::types::ValueRef::Real(f) if f.is_finite() && f >= 0.0 && f.fract() == 0.0 => {
+                f as i64
+            }
+            rusqlite::types::ValueRef::Text(t) => {
+                let s = std::str::from_utf8(t).map_err(|_| IngestError::InvalidTrade {
+                    id: trade_id_str.clone(),
+                    reason: "column `id`: invalid utf8".into(),
+                })?;
+                s.parse::<i64>().map_err(|_| IngestError::InvalidTrade {
+                    id: trade_id_str.clone(),
+                    reason: format!("column `id`: invalid integer `{s}`"),
+                })?
+            }
+            rusqlite::types::ValueRef::Null => {
+                return Err(IngestError::InvalidTrade {
+                    id: rowid.to_string(),
+                    reason: "column `id`: NULL".into(),
+                });
+            }
+            _ => {
+                return Err(IngestError::InvalidTrade {
+                    id: trade_id_str.clone(),
+                    reason: "column `id`: invalid type".into(),
+                });
+            }
+        };
+
+        let id = u64::try_from(id_raw).map_err(|_| IngestError::InvalidTrade {
+            id: trade_id_str.clone(),
+            reason: "negative id".into(),
+        })?;
+
+        let symbol: String = r.get(2).map_err(|e| {
+            let is_null = r
+                .get_ref(2)
+                .map(|v| matches!(v, rusqlite::types::ValueRef::Null))
+                .unwrap_or(false);
+            let reason = if is_null {
+                "column `symbol`: NULL".to_string()
+            } else {
+                format!("column `symbol`: {e}")
+            };
+            IngestError::InvalidTrade {
+                id: trade_id_str.clone(),
+                reason,
+            }
+        })?;
+
+        let direction_str: String = r.get(3).map_err(|e| {
+            let is_null = r
+                .get_ref(3)
+                .map(|v| matches!(v, rusqlite::types::ValueRef::Null))
+                .unwrap_or(false);
+            let reason = if is_null {
+                "column `direction`: NULL".to_string()
+            } else {
+                format!("column `direction`: {e}")
+            };
+            IngestError::InvalidTrade {
+                id: trade_id_str.clone(),
+                reason,
+            }
+        })?;
+
+        let size: f64 = r.get(4).map_err(|e| {
+            let is_null = r
+                .get_ref(4)
+                .map(|v| matches!(v, rusqlite::types::ValueRef::Null))
+                .unwrap_or(false);
+            let reason = if is_null {
+                "column `size`: NULL".to_string()
+            } else {
+                format!("column `size`: {e}")
+            };
+            IngestError::InvalidTrade {
+                id: trade_id_str.clone(),
+                reason,
+            }
+        })?;
+
+        let entry_time = time_from_value(r.get_ref(5)?).ok_or_else(|| {
+            let is_null = r
+                .get_ref(5)
+                .map(|v| matches!(v, rusqlite::types::ValueRef::Null))
+                .unwrap_or(false);
+            let reason = if is_null {
+                "column `entry_time`: NULL".to_string()
+            } else {
+                "column `entry_time`: invalid time".to_string()
+            };
+            IngestError::InvalidTrade {
+                id: trade_id_str.clone(),
+                reason,
+            }
+        })?;
+
+        let entry_price: f64 = r.get(6).map_err(|e| {
+            let is_null = r
+                .get_ref(6)
+                .map(|v| matches!(v, rusqlite::types::ValueRef::Null))
+                .unwrap_or(false);
+            let reason = if is_null {
+                "column `entry_price`: NULL".to_string()
+            } else {
+                format!("column `entry_price`: {e}")
+            };
+            IngestError::InvalidTrade {
+                id: trade_id_str.clone(),
+                reason,
+            }
+        })?;
+
+        let initial_sl: f64 = r.get(7).map_err(|e| {
+            let is_null = r
+                .get_ref(7)
+                .map(|v| matches!(v, rusqlite::types::ValueRef::Null))
+                .unwrap_or(false);
+            let reason = if is_null {
+                "column `initial_sl`: NULL".to_string()
+            } else {
+                format!("column `initial_sl`: {e}")
+            };
+            IngestError::InvalidTrade {
+                id: trade_id_str.clone(),
+                reason,
+            }
+        })?;
+
+        let pnl: f64 = r.get(8).map_err(|e| {
+            let is_null = r
+                .get_ref(8)
+                .map(|v| matches!(v, rusqlite::types::ValueRef::Null))
+                .unwrap_or(false);
+            let reason = if is_null {
+                "column `pnl`: NULL".to_string()
+            } else {
+                format!("column `pnl`: {e}")
+            };
+            IngestError::InvalidTrade {
+                id: trade_id_str.clone(),
+                reason,
+            }
+        })?;
+
+        let r_multiple: f64 = r.get(9).map_err(|e| {
+            let is_null = r
+                .get_ref(9)
+                .map(|v| matches!(v, rusqlite::types::ValueRef::Null))
+                .unwrap_or(false);
+            let reason = if is_null {
+                "column `r_multiple`: NULL".to_string()
+            } else {
+                format!("column `r_multiple`: {e}")
+            };
+            IngestError::InvalidTrade {
+                id: trade_id_str.clone(),
+                reason,
+            }
+        })?;
+
+        let exit_time_ref = r.get_ref(10)?;
+        let exit_time = match exit_time_ref {
+            rusqlite::types::ValueRef::Null => None,
+            v => Some(time_from_value(v).ok_or_else(|| IngestError::InvalidTrade {
+                id: trade_id_str.clone(),
+                reason: "column `exit_time`: invalid time".into(),
+            })?),
+        };
+
+        let exit_price: Option<f64> = r.get(11).unwrap_or(None);
+        let exit_reason_str: Option<String> = r.get(12).unwrap_or(None);
+        let take_profit: Option<f64> = r.get(13).unwrap_or(None);
+        let sl_history_str: Option<String> = r.get(14).unwrap_or(None);
+        let fee: Option<f64> = r.get(15).unwrap_or(None);
+        let mae_pct: Option<f64> = r.get(16).unwrap_or(None);
+        let mfe_pct: Option<f64> = r.get(17).unwrap_or(None);
+
+        let bad = |reason: String| IngestError::InvalidTrade {
+            id: trade_id_str.clone(),
+            reason,
+        };
+        let direction: TradeSide = parse_enum(&direction_str)
+            .map_err(|e| bad(format!("direction `{direction_str}`: {e}")))?;
+        let exit_reason: Option<ExitReason> = exit_reason_str
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .map(parse_enum::<ExitReason>)
+            .transpose()
+            .map_err(|e| bad(format!("exit_reason: {e}")))?;
+        let sl_history: Vec<StopPoint> = match sl_history_str.as_deref() {
+            Some(s) if !s.trim().is_empty() => {
+                serde_json::from_str(s).map_err(|e| bad(format!("sl_history: {e}")))?
+            }
+            _ => Vec::new(),
+        };
+
+        trades.push(Trade {
+            id,
+            symbol,
+            direction,
+            size,
+            entry_time,
+            entry_price,
+            exit_time,
+            exit_price,
+            exit_reason,
+            initial_sl,
+            take_profit,
+            sl_history,
+            pnl,
+            r_multiple,
+            fee: fee.unwrap_or(0.0),
+            mae_pct,
+            mfe_pct,
+        });
     }
     finish_trades(trades)
 }
@@ -337,5 +509,40 @@ mod tests {
             read_bars(&bad),
             Err(IngestError::InvalidBar { row: 1, .. })
         ));
+    }
+
+    #[test]
+    fn sqlite_real_and_text_entry_time() {
+        let c = db(r#"
+            CREATE TABLE trades (id INTEGER, symbol TEXT, direction TEXT, size REAL, entry_time REAL,
+              entry_price REAL, initial_sl REAL, pnl REAL, r_multiple REAL);
+            INSERT INTO trades VALUES (1,'BTCUSDT','long',1,1700000000.5,100,95,0,0);
+        "#);
+        let t = &read_trades(&c).unwrap()[0];
+        assert_eq!(t.entry_time, 1_700_000_000);
+
+        let c2 = db(r#"
+            CREATE TABLE trades (id INTEGER, symbol TEXT, direction TEXT, size REAL, entry_time TEXT,
+              entry_price REAL, initial_sl REAL, pnl REAL, r_multiple REAL);
+            INSERT INTO trades VALUES (2,'BTCUSDT','long',1,'2024-01-01T00:00:00Z',100,95,0,0);
+        "#);
+        let t2 = &read_trades(&c2).unwrap()[0];
+        assert_eq!(t2.entry_time, 1_704_067_200);
+    }
+
+    #[test]
+    fn sqlite_null_symbol_reports_invalid_trade() {
+        let c = db(r#"
+            CREATE TABLE trades (id INTEGER, symbol TEXT, direction TEXT, size REAL, entry_time INTEGER,
+              entry_price REAL, initial_sl REAL, pnl REAL, r_multiple REAL);
+            INSERT INTO trades VALUES (42, NULL, 'long', 1, 1700000000, 100, 95, 0, 0);
+        "#);
+        match read_trades(&c) {
+            Err(IngestError::InvalidTrade { id, reason }) => {
+                assert_eq!(id, "42");
+                assert_eq!(reason, "column `symbol`: NULL");
+            }
+            other => panic!("expected InvalidTrade for null symbol, got {other:?}"),
+        }
     }
 }
