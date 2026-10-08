@@ -32,6 +32,9 @@ pub async fn serve(config: Config, bus: EventBus) -> anyhow::Result<()> {
             config.lenient,
         )?,
         Mode::Live { .. } => Dataset::default(),
+        Mode::Replay { bars, .. } => {
+            Dataset::load_opts(None, Some(bars.as_path()), None, config.lenient)?
+        }
     };
     tracing::info!(
         "loaded {} bars, {} trades, {} strategy signals",

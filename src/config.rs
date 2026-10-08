@@ -49,6 +49,8 @@ pub struct Cli {
 pub enum Command {
     /// Run the real-time event streaming daemon.
     Live(LiveArgs),
+    /// Replay historical bars to the WebSocket stream at a chosen speed multiplier.
+    Replay(ReplayArgs),
 }
 
 #[derive(Debug, Args)]
@@ -58,6 +60,19 @@ pub struct LiveArgs {
     pub feed: Option<String>,
     #[arg(long)]
     pub symbol: Option<String>,
+    /// Timeframe, e.g. 15m.
+    #[arg(long)]
+    pub tf: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ReplayArgs {
+    /// Bars file or directory to replay.
+    #[arg(long)]
+    pub bars: PathBuf,
+    /// Playback speed multiplier (1, 2, 5, 10, 20, 50, 100).
+    #[arg(long, default_value_t = 10)]
+    pub speed: u32,
     /// Timeframe, e.g. 15m.
     #[arg(long)]
     pub tf: Option<String>,
@@ -75,6 +90,11 @@ pub enum Mode {
         symbol: Option<String>,
         tf: Option<String>,
     },
+    Replay {
+        bars: PathBuf,
+        speed: u32,
+        tf: Option<String>,
+    },
 }
 
 impl Mode {
@@ -82,6 +102,7 @@ impl Mode {
         match self {
             Mode::Offline { .. } => "offline",
             Mode::Live { .. } => "live",
+            Mode::Replay { .. } => "replay",
         }
     }
 }
@@ -147,6 +168,11 @@ impl From<Cli> for Config {
                 feed: l.feed,
                 symbol: l.symbol,
                 tf: l.tf,
+            },
+            Some(Command::Replay(r)) => Mode::Replay {
+                bars: r.bars,
+                speed: r.speed,
+                tf: r.tf,
             },
             None => Mode::Offline {
                 trades: cli.trades,
@@ -220,6 +246,27 @@ mod tests {
                 feed: Some("mt5".into()),
                 symbol: Some("EURUSD".into()),
                 tf: Some("15m".into())
+            }
+        );
+    }
+
+    #[test]
+    fn replay_subcommand_parsed() {
+        let c = parse(&[
+            "replay",
+            "--bars",
+            "./bars.csv",
+            "--speed",
+            "20",
+            "--tf",
+            "5m",
+        ]);
+        assert_eq!(
+            c.mode,
+            Mode::Replay {
+                bars: PathBuf::from("./bars.csv"),
+                speed: 20,
+                tf: Some("5m".into()),
             }
         );
     }

@@ -136,7 +136,7 @@ The ingestion layer (`src/ingestion/`) loads time-series and trade data from var
 
 ### Replay Engine & Hindsight-Free Ghost Mode
 
-The replay module (`src/replay.rs` and `web/src/replay/`) manages session playback as an in-memory state machine:
+Session playback in the web UI is driven by the client-side replay controller (`web/src/replay/controller.ts`), providing instant scrubbing and hindsight-free ghost mode without roundtrips. For server-driven live simulation, the Rust `ReplayEngine` (`src/replay.rs`) steps through historical candlesticks and streams them to `/ws/stream` on a configurable ticker:
 
 - Transitions across `Paused`, `Playing`, and `Finished` states.
 - Supports discrete speed multipliers: `1x`, `2x`, `5x`, `10x`, `20x`, `50x`, and `100x`.
@@ -337,7 +337,15 @@ markout live --host 0.0.0.0 --port 8080
 
 In this mode, the server initializes with an empty dataset and waits for events emitted across WebSocket clients or published through library hooks.
 
-### 3. Embedding as a Rust Library
+### 3. Replay Streaming Daemon
+
+Stream historical market data to the live UI and WebSocket subscribers using the backend replay engine:
+
+```bash
+markout replay --bars ./data/bars.csv --speed 10 --tf 1m
+```
+
+### 4. Embedding as a Rust Library
 
 You can embed `markout` directly into proprietary trading execution engines or backtesting frameworks:
 
@@ -392,7 +400,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-### 4. Streaming Events via WebSocket
+### 5. Streaming Events via WebSocket
 
 External processes (such as Python backtest harnesses or MT5 scripts) can push and consume real-time market data via `/ws/stream` (launch `markout` with `--allow-ws-publish` to accept inbound event injection):
 
@@ -437,8 +445,9 @@ ws.run_forever()
 markout [OPTIONS] [COMMAND]
 
 Commands:
-  live    Run the real-time event streaming daemon
-  help    Print this message or the help of the given subcommand(s)
+  live      Run the real-time event streaming daemon
+  replay    Replay historical bars to the WebSocket stream at a chosen speed multiplier
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --host <HOST>          Interface to bind [default: 127.0.0.1]

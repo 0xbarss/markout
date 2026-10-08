@@ -274,6 +274,7 @@ pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result
 
     let tf = match &config.mode {
         Mode::Live { tf, .. } => tf.as_deref().and_then(crate::config::parse_timeframe_sec),
+        Mode::Replay { tf, .. } => tf.as_deref().and_then(crate::config::parse_timeframe_sec),
         _ => None,
     };
 
@@ -315,6 +316,29 @@ pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result
                         }
                         Err(RecvError::Closed) => break,
                     }
+                }
+            });
+            Some(store)
+        }
+        Mode::Replay { speed, .. } => {
+            let mut engine = crate::replay::ReplayEngine::new(data.bars.clone());
+            let _ = engine.set_speed(*speed);
+            let mut snapshot = LiveSnapshot::new(50_000);
+            if let Some(first) = data.bars.first() {
+                snapshot.apply(MarketEvent::Bar(*first));
+                bus.publish(MarketEvent::Bar(*first));
+            }
+            let store = Arc::new(tokio::sync::RwLock::new(snapshot));
+            let store_clone = store.clone();
+            let bus_replay = bus.clone();
+            let spd = *speed;
+            tokio::spawn(async move {
+                let interval_ms = (1000 / spd.max(1)).max(10) as u64;
+                let mut ticker =
+                    tokio::time::interval(std::time::Duration::from_millis(interval_ms));
+                while let Some(ev) = engine.publish_next(&bus_replay) {
+                    ticker.tick().await;
+                    store_clone.write().await.apply(ev);
                 }
             });
             Some(store)
@@ -1257,5 +1281,73 @@ mod tests {
         let health: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(health["mode"], "live");
         assert_eq!(health["symbol"], "ETHUSDT");
+    }
+
+    #[tokio::test]
+    async fn replay_mode_drives_engine_and_bus() {
+        let bus = EventBus::default();
+        let mut rx = bus.subscribe();
+
+        let bars = vec![
+            Bar {
+                time: 100,
+                open: 1.0,
+                high: 2.0,
+                low: 0.5,
+                close: 1.5,
+                volume: 10.0,
+            },
+            Bar {
+                time: 200,
+                open: 1.5,
+                high: 2.5,
+                low: 1.0,
+                close: 2.0,
+                volume: 20.0,
+            },
+            Bar {
+                time: 300,
+                open: 2.0,
+                high: 3.0,
+                low: 1.8,
+                close: 2.5,
+                volume: 30.0,
+            },
+        ];
+
+        let mut engine = crate::replay::ReplayEngine::new(bars.clone());
+        let _ = engine.set_speed(100);
+        let mut snapshot = LiveSnapshot::new(50_000);
+        if let Some(first) = bars.first() {
+            snapshot.apply(MarketEvent::Bar(*first));
+            bus.publish(MarketEvent::Bar(*first));
+        }
+
+        let store = Arc::new(tokio::sync::RwLock::new(snapshot));
+        let store_clone = store.clone();
+        let bus_replay = bus.clone();
+
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_millis(10));
+            while let Some(ev) = engine.publish_next(&bus_replay) {
+                ticker.tick().await;
+                store_clone.write().await.apply(ev);
+            }
+        });
+
+        // First bar is received immediately
+        let ev0 = rx.recv().await.unwrap();
+        assert_eq!(ev0, MarketEvent::Bar(bars[0]));
+
+        // Second and third bars are emitted by the replay engine
+        let ev1 = rx.recv().await.unwrap();
+        assert_eq!(ev1, MarketEvent::Bar(bars[1]));
+
+        let ev2 = rx.recv().await.unwrap();
+        assert_eq!(ev2, MarketEvent::Bar(bars[2]));
+
+        // Snapshot retains all 3 bars
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_eq!(store.read().await.bars().len(), 3);
     }
 }
