@@ -43,6 +43,8 @@ pub enum IngestError {
     DuplicateBar(i64),
     #[error("invalid trade {id}: {reason}")]
     InvalidTrade { id: String, reason: String },
+    #[error("invalid signal {id}: {reason}")]
+    InvalidSignal { id: String, reason: String },
 }
 
 pub type Result<T> = std::result::Result<T, IngestError>;

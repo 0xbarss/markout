@@ -8,6 +8,7 @@
 //! Includes timestamp/time, and optional symbol/strategy/comment.
 
 use std::{
+    collections::HashSet,
     fs::File,
     io::{BufRead, BufReader, Read},
     path::Path,
@@ -16,7 +17,7 @@ use std::{
 use rusqlite::Connection;
 use serde::Deserialize;
 
-use super::{extension, io_err, normalize_time, IngestError, Result};
+use super::{extension, io_err, normalize_time, parse_enum, IngestError, Result};
 use crate::models::{Direction, Signal};
 
 pub fn load(path: &Path) -> Result<Vec<Signal>> {
@@ -65,7 +66,7 @@ pub fn parse_jsonl<R: BufRead>(reader: R) -> Result<Vec<Signal>> {
             continue;
         }
         let sig: SignalRaw =
-            serde_json::from_str(trimmed).map_err(|e| IngestError::InvalidTrade {
+            serde_json::from_str(trimmed).map_err(|e| IngestError::InvalidSignal {
                 id: format!("signal line {}", i + 1),
                 reason: e.to_string(),
             })?;
@@ -136,35 +137,95 @@ pub fn parse_csv<R: Read>(reader: R) -> Result<Vec<Signal>> {
     finish_signals(out)
 }
 
-pub fn load_sqlite(path: &Path) -> Result<Vec<Signal>> {
-    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+fn pick<'a>(cols: &HashSet<String>, names: &[&'a str]) -> Option<&'a str> {
+    names.iter().copied().find(|n| cols.contains(*n))
+}
 
-    let table = ["signals", "strategy_signals", "strategy"]
+const SIGNAL_TABLES: &[&str] = &["signals", "strategy_signals", "strategy"];
+
+pub fn read_sqlite(conn: &Connection) -> Result<Vec<Signal>> {
+    let table = SIGNAL_TABLES
         .iter()
         .copied()
-        .find(|t| table_exists(&conn, t))
+        .find(|t| super::sqlite::has_table(conn, t).unwrap_or(false))
         .ok_or_else(|| IngestError::MissingTable("signals".into()))?;
+    let cols = super::sqlite::columns(conn, table)?;
 
-    let mut stmt = conn.prepare(&format!(
-        "SELECT id, COALESCE(time, timestamp, 0), symbol, COALESCE(direction, action, signal, 'buy'), COALESCE(entry_price, price, 0.0), COALESCE(stop_loss, sl, 0.0), COALESCE(take_profit, tp, 0.0), COALESCE(strategy, name, ''), comment FROM {table}"
-    ))?;
+    let need = |names: &[&'static str], label: &'static str| {
+        pick(&cols, names).ok_or(IngestError::MissingColumn {
+            table,
+            column: label,
+        })
+    };
+    let time = need(&["time", "timestamp"], "time")?;
+    let dir = need(&["direction", "action", "side", "signal"], "direction")?;
+    let entry = need(&["entry_price", "price"], "entry_price")?;
+    let sl = pick(&cols, &["stop_loss", "sl", "initial_sl"]);
+    let tp = pick(&cols, &["take_profit", "tp"]);
+    let strat = pick(&cols, &["strategy", "name"]);
 
+    let id_expr = if cols.contains("id") {
+        "CAST(id AS TEXT)"
+    } else {
+        "NULL"
+    };
+    let sym_expr = if cols.contains("symbol") {
+        "symbol"
+    } else {
+        "NULL"
+    };
+    let sl_expr = sl
+        .map(|c| format!("COALESCE({c}, 0.0)"))
+        .unwrap_or_else(|| "0.0".to_string());
+    let tp_expr = tp
+        .map(|c| format!("COALESCE({c}, 0.0)"))
+        .unwrap_or_else(|| "0.0".to_string());
+    let strat_expr = strat.unwrap_or("NULL");
+    let comment_expr = if cols.contains("comment") {
+        "comment"
+    } else {
+        "NULL"
+    };
+
+    // Table and column names come from the static lists above, never from user input.
+    let sql = format!(
+        "SELECT {id_expr}, {time}, {sym_expr}, {dir}, {entry}, {sl_expr}, {tp_expr}, {strat_expr}, {comment_expr} FROM {table}"
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], |row| {
-        let id_raw: Option<String> = row.get(0).ok();
-        let time: i64 = row.get(1)?;
-        let symbol: Option<String> = row.get(2).ok();
-        let dir_str: String = row.get(3)?;
-        let entry_price: f64 = row.get(4)?;
-        let stop_loss: f64 = row.get(5)?;
-        let take_profit: f64 = row.get(6)?;
-        let strategy: Option<String> = row.get(7).ok();
-        let comment: Option<String> = row.get(8).ok();
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, f64>(4)?,
+            row.get::<_, f64>(5)?,
+            row.get::<_, f64>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+        ))
+    })?;
+
+    let mut out = Vec::new();
+    for (row_idx, r) in rows.enumerate() {
+        let (id_raw, time, symbol, dir_str, entry_price, stop_loss, take_profit, strategy, comment) =
+            r?;
+        let id = id_raw.unwrap_or_default();
+        let signal_id = if id.is_empty() {
+            format!("sig_{}", row_idx + 1)
+        } else {
+            id.clone()
+        };
 
         let direction: Direction =
-            serde_json::from_value(serde_json::Value::String(dir_str)).unwrap_or(Direction::Buy);
+            parse_enum(&dir_str).map_err(|e| IngestError::InvalidSignal {
+                id: signal_id,
+                reason: format!("direction `{dir_str}`: {e}"),
+            })?;
 
-        Ok(Signal {
-            id: id_raw.unwrap_or_default(),
+        out.push(Signal {
+            id,
             time,
             symbol,
             direction,
@@ -173,28 +234,30 @@ pub fn load_sqlite(path: &Path) -> Result<Vec<Signal>> {
             take_profit,
             strategy,
             comment,
-        })
-    })?;
-
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r?);
+        });
     }
     finish_signals(out)
 }
 
-fn table_exists(conn: &Connection, table: &str) -> bool {
-    conn.query_row(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",
-        [table],
-        |_| Ok(()),
-    )
-    .is_ok()
+pub fn load_sqlite(path: &Path) -> Result<Vec<Signal>> {
+    let conn = super::sqlite::open(path)?;
+    read_sqlite(&conn)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn create_sqlite_file(sql: &str) -> tempfile::NamedTempFile {
+        let tmp = tempfile::Builder::new()
+            .suffix(".sqlite")
+            .tempfile()
+            .unwrap();
+        let conn = Connection::open(tmp.path()).unwrap();
+        conn.execute_batch(sql).unwrap();
+        conn.close().unwrap();
+        tmp
+    }
 
     #[test]
     fn parse_jsonl_signals_matching_ts_core() {
@@ -230,5 +293,120 @@ mod tests {
         assert_eq!(sigs[0].take_profit, 42000.0);
         assert_eq!(sigs[0].strategy.as_deref(), Some("Mustang"));
         assert!(sigs[0].is_valid());
+    }
+
+    #[test]
+    fn load_sqlite_canonical_columns() {
+        let tmp = create_sqlite_file(
+            r#"
+            CREATE TABLE signals (
+                id TEXT,
+                time INTEGER,
+                symbol TEXT,
+                direction TEXT,
+                entry_price REAL,
+                stop_loss REAL,
+                take_profit REAL,
+                strategy TEXT,
+                comment TEXT
+            );
+            INSERT INTO signals VALUES ('sig-canonical', 1700000000, 'BTCUSDT', 'buy', 65000.0, 64000.0, 66000.0, 'EMA Breakout', 'test note');
+        "#,
+        );
+        let sigs = load_sqlite(tmp.path()).unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0].id, "sig-canonical");
+        assert_eq!(sigs[0].time, 1700000000);
+        assert_eq!(sigs[0].symbol.as_deref(), Some("BTCUSDT"));
+        assert_eq!(sigs[0].direction, Direction::Buy);
+        assert_eq!(sigs[0].entry_price, 65000.0);
+        assert_eq!(sigs[0].stop_loss, 64000.0);
+        assert_eq!(sigs[0].take_profit, 66000.0);
+        assert_eq!(sigs[0].strategy.as_deref(), Some("EMA Breakout"));
+        assert_eq!(sigs[0].comment.as_deref(), Some("test note"));
+    }
+
+    #[test]
+    fn load_sqlite_aliases_and_alternative_table() {
+        let tmp = create_sqlite_file(
+            r#"
+            CREATE TABLE strategy_signals (
+                timestamp INTEGER,
+                action TEXT,
+                price REAL,
+                sl REAL,
+                tp REAL,
+                name TEXT
+            );
+            INSERT INTO strategy_signals VALUES (1700000000, 'short', 3500.0, 3600.0, 3400.0, 'RSI Div');
+        "#,
+        );
+        let sigs = load_sqlite(tmp.path()).unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0].id, "sig_1");
+        assert_eq!(sigs[0].time, 1700000000);
+        assert_eq!(sigs[0].direction, Direction::Sell);
+        assert_eq!(sigs[0].entry_price, 3500.0);
+        assert_eq!(sigs[0].stop_loss, 3600.0);
+        assert_eq!(sigs[0].take_profit, 3400.0);
+        assert_eq!(sigs[0].strategy.as_deref(), Some("RSI Div"));
+    }
+
+    #[test]
+    fn load_sqlite_integer_id() {
+        let tmp = create_sqlite_file(
+            r#"
+            CREATE TABLE signals (
+                id INTEGER PRIMARY KEY,
+                time INTEGER,
+                direction TEXT,
+                entry_price REAL
+            );
+            INSERT INTO signals VALUES (1042, 1700000000, 'buy', 100.0);
+        "#,
+        );
+        let sigs = load_sqlite(tmp.path()).unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0].id, "1042");
+    }
+
+    #[test]
+    fn load_sqlite_missing_stop_loss_column() {
+        let tmp = create_sqlite_file(
+            r#"
+            CREATE TABLE signals (
+                time INTEGER,
+                direction TEXT,
+                entry_price REAL
+            );
+            INSERT INTO signals VALUES (1700000000, 'buy', 100.0);
+        "#,
+        );
+        let sigs = load_sqlite(tmp.path()).unwrap();
+        assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0].stop_loss, 0.0);
+        assert_eq!(sigs[0].take_profit, 0.0);
+    }
+
+    #[test]
+    fn load_sqlite_invalid_direction_reports_invalid_signal() {
+        let tmp = create_sqlite_file(
+            r#"
+            CREATE TABLE signals (
+                id TEXT,
+                time INTEGER,
+                direction TEXT,
+                entry_price REAL
+            );
+            INSERT INTO signals VALUES ('sig-bad', 1700000000, 'banana', 100.0);
+        "#,
+        );
+        match load_sqlite(tmp.path()) {
+            Err(IngestError::InvalidSignal { id, reason }) => {
+                assert_eq!(id, "sig-bad");
+                assert!(reason.contains("direction `banana`"));
+            }
+            other => panic!("expected InvalidSignal, got {other:?}"),
+        }
     }
 }

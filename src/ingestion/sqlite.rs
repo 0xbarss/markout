@@ -45,7 +45,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     )?)
 }
 
-fn columns(conn: &Connection, table: &str) -> Result<HashSet<String>> {
+pub(crate) fn columns(conn: &Connection, table: &str) -> Result<HashSet<String>> {
     let mut stmt = conn.prepare("SELECT name FROM pragma_table_info(?1)")?;
     let cols = stmt
         .query_map([table], |r| r.get::<_, String>(0))?
