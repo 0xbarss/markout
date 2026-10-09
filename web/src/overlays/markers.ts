@@ -1,6 +1,6 @@
 import type { SeriesMarker, Time } from "lightweight-charts";
 import { fmtPrice, fmtSigned } from "../format.ts";
-import type { Bar, ExitReason, Trade } from "../types";
+import type { Bar, ExitReason, Trade } from "../types.ts";
 import { locate } from "./snap.ts";
 import { getThemeTokens } from "../theme.ts";
 

@@ -1,6 +1,6 @@
-import { $, h } from "../dom";
-import { fmt, fmtSigned, signClass } from "../format";
-import type { Stats, Trade } from "../types";
+import { $, h } from "../dom.ts";
+import { fmt, fmtSigned, signClass } from "../format.ts";
+import type { Stats, Trade } from "../types.ts";
 
 export function renderStats(s: Stats, trades: Trade[] = []): void {
   // 1. Hero PnL
@@ -20,12 +20,14 @@ export function renderStats(s: Stats, trades: Trade[] = []): void {
   if (sparklinePath && closed.length > 0) {
     let cum = 0;
     const pts = [0];
+    let min = 0;
+    let max = 0;
     for (const t of closed) {
       cum += t.pnl;
       pts.push(cum);
+      if (cum < min) min = cum;
+      if (cum > max) max = cum;
     }
-    const min = Math.min(...pts);
-    const max = Math.max(...pts);
     const range = max - min || 1;
     const w = 190;
     const h = 40;

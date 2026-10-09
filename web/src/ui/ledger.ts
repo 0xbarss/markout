@@ -1,6 +1,6 @@
-import { $, h } from "../dom";
-import { fmtDuration, fmtPrice, fmtSigned, signClass } from "../format";
-import type { Signal, Trade } from "../types";
+import { $, h } from "../dom.ts";
+import { fmtDuration, fmtPrice, fmtSigned, signClass } from "../format.ts";
+import type { Signal, Trade } from "../types.ts";
 
 export interface ColumnDef {
   label: string;

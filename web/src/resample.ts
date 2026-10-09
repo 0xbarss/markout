@@ -1,4 +1,4 @@
-import type { Bar } from "./types";
+import type { Bar } from "./types.ts";
 
 export const TIMEFRAMES = [
   { label: "1m", sec: 60 },

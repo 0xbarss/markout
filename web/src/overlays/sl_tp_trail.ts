@@ -1,5 +1,5 @@
 import { barIndexAt } from "./snap.ts";
-import type { Bar, Trade } from "../types";
+import type { Bar, Trade } from "../types.ts";
 
 /** A line point; a point without `value` is a gap that breaks the line. */
 export interface TrailPoint { time: number; value?: number; }
@@ -95,12 +95,12 @@ export function buildTrail(
 }
 
 /** Synchronizes series pool with lane data, dynamically trimming spare series beyond headroom of 8. */
-export function syncLanes<T extends { setData(data: any): void }>(
+export function syncLanes<D, T extends { setData(data: D[]): void }>(
   pool: T[],
   lanes: TrailPoint[][],
   make: () => T,
   remove: (series: T) => void,
-  toData: (lane: TrailPoint[]) => any[],
+  toData: (lane: TrailPoint[]) => D[],
 ): void {
   while (pool.length < lanes.length) pool.push(make());
   while (pool.length > lanes.length + 8) {

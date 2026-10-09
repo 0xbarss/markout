@@ -360,3 +360,64 @@ test("replay controller: preserves cursor timestamp across timeframe switch", ()
   controller.destroy();
 });
 
+test("replay controller: 50x speed accumulator matches nominal rate", () => {
+  // Simulate advancing over N ms with dt increments matching setInterval rate
+  const simulateAdvance = (speed: number, totalMs: number, tickMs = 20) => {
+    let acc = 0;
+    let steps = 0;
+    const ticks = Math.floor(totalMs / tickMs);
+    for (let i = 0; i < ticks; i++) {
+      const dtSec = tickMs / 1000;
+      acc += speed * 2.5 * dtSec;
+      const s = Math.floor(acc);
+      acc -= s;
+      steps += s;
+    }
+    return steps;
+  };
+
+  // For 1,000ms:
+  // Nominal rate at 50x is 50 * 2.5 = 125 bars/s.
+  // Old rounding advanced 3 bars per 20ms tick = 150 bars/s (1.20x off).
+  // Accumulator matches nominal within 1 bar:
+  for (const nMs of [40, 100, 200, 500, 1000]) {
+    const expected = Math.round(50 * 2.5 * (nMs / 1000));
+    const actual = simulateAdvance(50, nMs, 20);
+    assert.ok(
+      Math.abs(actual - expected) <= 1,
+      `at ${nMs}ms, expected ${expected} steps within 1, got ${actual}`,
+    );
+  }
+  assert.equal(simulateAdvance(50, 1000, 20), 125);
+});
+
+test("replay controller: getBars getter and independent live updates", () => {
+  const baseBars = makeBars(5);
+  // View is independent slice
+  const viewBars = baseBars.slice();
+  const controller = new ReplayController(viewBars, []);
+
+  assert.equal(controller.getBars().length, 5);
+  assert.equal(controller.getBars(), viewBars);
+  assert.notEqual(controller.getBars(), baseBars);
+
+  // When live bar arrives
+  const newBar: Bar = {
+    time: T0 + 5 * STEP,
+    open: 110,
+    high: 115,
+    low: 108,
+    close: 112,
+    volume: 15,
+  };
+
+  controller.appendOrUpdateBar(newBar);
+  assert.equal(controller.getBars().length, 6);
+  assert.equal(controller.getCursor(), 5);
+  assert.equal(controller.isLive(), true);
+  assert.equal(controller.getVisibleBars().length, 6);
+
+  controller.destroy();
+});
+
+

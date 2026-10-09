@@ -126,6 +126,14 @@ export type Drawing =
   | MeasureDrawing
   | TextDrawing;
 
+export type StyleableDrawing = Drawing & {
+  color?: string;
+  lineWidth?: number;
+  lineStyle?: LineStyleType;
+  targetColor?: string;
+  stopColor?: string;
+};
+
 export interface CoordinateConverter {
   timeToX(time: number): number | null;
   xToTime(x: number): number | null;

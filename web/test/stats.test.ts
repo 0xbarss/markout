@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { computeStats } from "../src/stats.ts";
+import { renderStats } from "../src/ui/panel.ts";
 import type { Stats, Trade } from "../src/types.ts";
 
 const makeTrade = (over: Partial<Trade> = {}): Trade => ({
@@ -107,3 +108,53 @@ test("computeStats: cross-language stats parity fixtures", () => {
     }
   }
 });
+
+test("panel sparkline: handles 150,000 trades without RangeError", () => {
+  const origDocument = (globalThis as unknown as { document?: unknown }).document;
+  const mockEl = () => ({
+    setAttribute: () => {},
+    replaceChildren: () => {},
+    append: () => {},
+    style: {},
+    title: "",
+    textContent: "",
+    className: "",
+  });
+  (globalThis as unknown as { document: unknown }).document = {
+    getElementById: () => mockEl(),
+    createElement: () => mockEl(),
+    createTextNode: (text: string) => ({ text }),
+  };
+
+  try {
+    const hugeTrades: Trade[] = [];
+    for (let i = 0; i < 150_000; i++) {
+      hugeTrades.push({
+        id: i,
+        symbol: "BTC",
+        direction: "buy",
+        size: 1,
+        entry_time: 1000 + i,
+        entry_price: 100,
+        exit_time: 2000 + i,
+        exit_price: 105,
+        exit_reason: "take_profit",
+        initial_sl: 95,
+        take_profit: 105,
+        sl_history: [],
+        pnl: i % 2 === 0 ? 1 : -1,
+        r_multiple: 1,
+        fee: 0,
+        mae_pct: null,
+        mfe_pct: null,
+      });
+    }
+    const s = computeStats([]);
+    assert.doesNotThrow(() => {
+      renderStats(s, hugeTrades);
+    });
+  } finally {
+    (globalThis as unknown as { document: unknown }).document = origDocument;
+  }
+});
+

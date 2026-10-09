@@ -1,4 +1,4 @@
-import type { Bar } from "../types";
+import type { Bar } from "../types.ts";
 
 /** Index of the last bar with time <= t, or -1 when t precedes every bar. */
 export function barIndexAt(bars: Bar[], t: number): number {

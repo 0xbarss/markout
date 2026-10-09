@@ -1,4 +1,4 @@
-import type { LineStyleType } from "./types.ts";
+import type { Drawing, LineStyleType, StyleableDrawing } from "./types.ts";
 
 export function applyLineDash(ctx: CanvasRenderingContext2D, style?: LineStyleType): void {
   if (style === "dashed") {
@@ -64,4 +64,39 @@ export function formatRgba(hex: string, alpha: number): string {
     return `#${c}`;
   }
   return `rgba(${r}, ${g}, ${b}, ${clampedA})`;
+}
+
+export function getDrawingColor(d: Drawing): string {
+  const sd = d as StyleableDrawing;
+  if (sd.color) return sd.color;
+  if (sd.targetColor) return sd.targetColor;
+  if (d.type === "horizontal") return "#848e9c";
+  return "#f7a600";
+}
+
+export function setDrawingColor(d: Drawing, color: string): void {
+  const sd = d as StyleableDrawing;
+  sd.color = color;
+}
+
+export function getDrawingWidth(d: Drawing): number {
+  const sd = d as StyleableDrawing;
+  if (typeof sd.lineWidth === "number") return sd.lineWidth;
+  return d.type === "arrow" ? 2 : 1.5;
+}
+
+export function setDrawingWidth(d: Drawing, width: number): void {
+  const sd = d as StyleableDrawing;
+  sd.lineWidth = width;
+}
+
+export function getDrawingLineStyle(d: Drawing): LineStyleType {
+  const sd = d as StyleableDrawing;
+  if (sd.lineStyle) return sd.lineStyle;
+  return d.type === "horizontal" || d.type === "vertical" ? "dashed" : "solid";
+}
+
+export function setDrawingLineStyle(d: Drawing, style: LineStyleType): void {
+  const sd = d as StyleableDrawing;
+  sd.lineStyle = style;
 }

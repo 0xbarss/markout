@@ -255,7 +255,7 @@ async function main(): Promise<void> {
     const currentVisible = replay.getVisibleBars();
     const preserveTime =
       currentVisible.length > 0 ? currentVisible[currentVisible.length - 1].time : null;
-    view = active === base || base === 0 ? bars : resample(bars, active, base);
+    view = active === base || base === 0 ? bars.slice() : resample(bars, active, base);
     lastPanelKey = "";
     replay.setData(view, overlayTrades, overlaySignals, preserveTime);
     replayBar.setTrades(overlayTrades, view);
@@ -377,6 +377,16 @@ async function main(): Promise<void> {
 main().catch((err: unknown) => {
   const el = $("error");
   const msg = err instanceof Error ? err.message : String(err);
-  el.innerHTML = `<div><strong>Failed to load data:</strong> ${msg}</div><div style="font-size:11px;opacity:0.8;margin-top:4px">Check if the server is running on the expected port or verify input files with <code>--bars &lt;path&gt; --db &lt;path&gt;</code>.</div>`;
+  el.replaceChildren();
+  const title = h("div");
+  const strong = h("strong", "", "Failed to load data: ");
+  title.append(strong, document.createTextNode(msg));
+  const hint = h("div", "error-hint");
+  hint.append(
+    document.createTextNode("Check if the server is running on the expected port or verify input files with "),
+    h("code", "", "--bars <path> --db <path>"),
+    document.createTextNode("."),
+  );
+  el.append(title, hint);
   el.hidden = false;
 });

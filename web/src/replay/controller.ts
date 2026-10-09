@@ -160,12 +160,17 @@ export class ReplayController {
 
     const insertIdx = findBarInsertIndex(this.bars, bar.time);
     this.bars.splice(insertIdx, 0, bar);
+    console.warn(`Inserted out-of-order bar at time ${bar.time}`);
     if (wasLive) {
       this.cursor = this.bars.length - 1;
     }
     this.dataVersion++;
     this.emitState();
     this.emitFrame();
+  }
+
+  public getBars(): Bar[] {
+    return this.bars;
   }
 
   public updateTrades(trades: Trade[]): void {
@@ -351,11 +356,19 @@ export class ReplayController {
     const baseIntervalMs = 400;
     const rawInterval = baseIntervalMs / this.speed;
     const intervalMs = Math.max(20, Math.round(rawInterval));
-    const stepCount = Math.max(1, Math.round(20 / rawInterval));
+    let lastTime = performance.now();
+    let acc = 0;
 
     this.timer = setInterval(() => {
+      const now = performance.now();
+      const dtSec = Math.max(0, (now - lastTime) / 1000);
+      lastTime = now;
+      acc += this.speed * 2.5 * dtSec;
+      const steps = Math.floor(acc);
+      acc -= steps;
+
       let advanced = false;
-      for (let s = 0; s < stepCount; s++) {
+      for (let s = 0; s < steps; s++) {
         if (this.cursor < this.bars.length - 1) {
           this.cursor += 1;
           advanced = true;

@@ -294,7 +294,45 @@ pub async fn resolve_host(host: &str, port: u16) -> anyhow::Result<SocketAddr> {
     chosen.ok_or_else(|| anyhow::anyhow!("cannot resolve host `{host}`"))
 }
 
+async fn default_shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(_) => {
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+}
+
 pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result<()> {
+    run_with_shutdown(config, bus, data, default_shutdown_signal()).await
+}
+
+pub async fn run_with_shutdown<F>(
+    config: Config,
+    bus: EventBus,
+    data: Dataset,
+    shutdown: F,
+) -> anyhow::Result<()>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
     let addr = resolve_host(&config.host, config.port).await?;
     let host_is_loopback = addr.ip().is_loopback();
     if !host_is_loopback {
@@ -410,9 +448,7 @@ pub async fn run(config: Config, bus: EventBus, data: Dataset) -> anyhow::Result
     );
 
     axum::serve(listener, router(state))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown)
         .await?;
     Ok(())
 }
@@ -1454,5 +1490,39 @@ mod tests {
         decoder.read_to_end(&mut decompressed).unwrap();
         let bars: Vec<Bar> = serde_json::from_slice(&decompressed).unwrap();
         assert_eq!(bars, vec![bar]);
+    }
+
+    #[tokio::test]
+    async fn run_with_shutdown_terminates_cleanly() {
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let config = Config {
+            host: "127.0.0.1".into(),
+            port: 0, // let OS pick an ephemeral port
+            allow_hosts: vec![],
+            allow_origins: vec![],
+            allow_ws_publish: false,
+            lenient: false,
+            mode: Mode::Offline {
+                trades: None,
+                bars: None,
+                strategy: None,
+            },
+        };
+        let bus = EventBus::default();
+        let server_handle = tokio::spawn(async move {
+            run_with_shutdown(config, bus, Dataset::default(), async move {
+                let _ = rx.await;
+            })
+            .await
+        });
+
+        // Trigger shutdown
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let _ = tx.send(());
+
+        let res = tokio::time::timeout(std::time::Duration::from_secs(2), server_handle).await;
+        assert!(res.is_ok(), "server did not shut down within timeout");
+        let inner = res.unwrap().unwrap();
+        assert!(inner.is_ok(), "server returned error: {inner:?}");
     }
 }

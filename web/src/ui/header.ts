@@ -24,7 +24,7 @@ export function renderTimeframes(base: number, active: number, onSelect: (sec: n
 
 
 let lastPriceVal: number | null = null;
-let flashTimeout: any = null;
+let flashTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function flashTicker(newPrice: number): void {
   const tickerEl = document.querySelector(".ticker");
@@ -34,7 +34,9 @@ function flashTicker(newPrice: number): void {
     tickerEl.classList.remove("flash-up", "flash-down");
     void (tickerEl as HTMLElement).offsetWidth;
     tickerEl.classList.add(isUp ? "flash-up" : "flash-down");
-    clearTimeout(flashTimeout);
+    if (flashTimeout !== null) {
+      clearTimeout(flashTimeout);
+    }
     flashTimeout = setTimeout(() => {
       tickerEl.classList.remove("flash-up", "flash-down");
     }, 350);

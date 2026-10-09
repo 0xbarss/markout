@@ -1,6 +1,15 @@
 import { h } from "../dom.ts";
 import type { DrawingManager } from "../drawings/manager.ts";
-import { formatRgba, parseColor } from "../drawings/style_utils.ts";
+import {
+  formatRgba,
+  getDrawingColor,
+  getDrawingLineStyle,
+  getDrawingWidth,
+  parseColor,
+  setDrawingColor,
+  setDrawingLineStyle,
+  setDrawingWidth,
+} from "../drawings/style_utils.ts";
 import type { Drawing, FibonacciDrawing, LineStyleType } from "../drawings/types.ts";
 import { openDrawingSettingsDialog, PRESET_COLORS } from "./drawing_dialog.ts";
 
@@ -115,7 +124,7 @@ export class DrawingFloatingToolbar {
     colorBtn.type = "button";
     colorBtn.title = "Change Color";
     const colorSwatch = h("span", "floating-color-indicator");
-    const activeColor = (d as any).color ?? ((d as any).targetColor ?? "#f7a600");
+    const activeColor = getDrawingColor(d);
     colorSwatch.style.backgroundColor = activeColor;
     colorBtn.append(colorSwatch);
 
@@ -130,7 +139,7 @@ export class DrawingFloatingToolbar {
       const widthBtn = h("button", "floating-btn width-btn") as HTMLButtonElement;
       widthBtn.type = "button";
       widthBtn.title = "Line Thickness";
-      const w = (d as any).lineWidth ?? (d.type === "arrow" ? 2 : 1.5);
+      const w = getDrawingWidth(d);
       const widthIcon = h("span", "floating-width-indicator");
       widthIcon.style.height = `${Math.min(4, Math.max(1, Math.round(w)))}px`;
       widthBtn.append(widthIcon);
@@ -145,7 +154,7 @@ export class DrawingFloatingToolbar {
       const styleBtn = h("button", "floating-btn style-btn") as HTMLButtonElement;
       styleBtn.type = "button";
       styleBtn.title = "Line Style";
-      const curStyle: LineStyleType = (d as any).lineStyle ?? (d.type === "horizontal" || d.type === "vertical" ? "dashed" : "solid");
+      const curStyle: LineStyleType = getDrawingLineStyle(d);
       const styleIcon = h("span", `floating-style-indicator ${curStyle}`);
       styleBtn.append(styleIcon);
 
@@ -241,7 +250,7 @@ export class DrawingFloatingToolbar {
 
     if (!this.currentDrawing) return;
     const curDrawing = this.currentDrawing;
-    const activeColor = (curDrawing as any).color ?? ((curDrawing as any).targetColor ?? "#f7a600");
+    const activeColor = getDrawingColor(curDrawing);
     const parsed = parseColor(activeColor);
     let curHex = parsed.hex;
     let curAlpha = parsed.alpha;
@@ -269,7 +278,7 @@ export class DrawingFloatingToolbar {
       if (!this.currentDrawing) return;
       const d = JSON.parse(JSON.stringify(this.currentDrawing)) as Drawing;
       const formatted = formatRgba(curHex, curAlpha);
-      (d as any).color = formatted;
+      setDrawingColor(d, formatted);
       if (d.type === "position") {
         d.color = formatted;
       } else if (d.type === "box_zone") {
@@ -356,7 +365,7 @@ export class DrawingFloatingToolbar {
       b.addEventListener("click", () => {
         if (!this.currentDrawing) return;
         const d = JSON.parse(JSON.stringify(this.currentDrawing)) as Drawing;
-        (d as any).lineWidth = w;
+        setDrawingWidth(d, w);
         this.manager.updateDrawing(d, true);
         this.render();
       });
@@ -388,7 +397,7 @@ export class DrawingFloatingToolbar {
       b.addEventListener("click", () => {
         if (!this.currentDrawing) return;
         const d = JSON.parse(JSON.stringify(this.currentDrawing)) as Drawing;
-        (d as any).lineStyle = s.id;
+        setDrawingLineStyle(d, s.id);
         this.manager.updateDrawing(d, true);
         this.render();
       });

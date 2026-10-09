@@ -1,15 +1,15 @@
 import {
   ColorType, CrosshairMode, LineStyle, LineType, createChart,
-  type CandlestickData, type ISeriesApi, type LineData, type UTCTimestamp, type WhitespaceData,
+  type CandlestickData, type Coordinate, type ISeriesApi, type LineData, type UTCTimestamp, type WhitespaceData,
 } from "lightweight-charts";
 import { DrawingManager } from "./drawings/manager.ts";
 import type { CoordinateConverter } from "./drawings/types.ts";
-import { precisionFor } from "./format";
-import { buildMarkers } from "./overlays/markers";
-import { buildSignalMarkers } from "./overlays/signals";
+import { precisionFor } from "./format.ts";
+import { buildMarkers } from "./overlays/markers.ts";
+import { buildSignalMarkers } from "./overlays/signals.ts";
 import { barIndexAt, locate } from "./overlays/snap.ts";
-import { buildTrail, syncLanes, type TrailPoint } from "./overlays/sl_tp_trail";
-import type { Bar, Signal, Trade } from "./types";
+import { buildTrail, syncLanes, type TrailPoint } from "./overlays/sl_tp_trail.ts";
+import type { Bar, Signal, Trade } from "./types.ts";
 import { DrawingFloatingToolbar } from "./ui/drawing_toolbar.ts";
 
 import { getThemeTokens, hexToRgba } from "./theme.ts";
@@ -136,19 +136,19 @@ export function createTerminalChart(container: HTMLElement): TerminalChart {
   let currentSelectedSignalId: string | null = null;
   const conv: CoordinateConverter = {
     timeToX: (t) => chart.timeScale().timeToCoordinate(t as UTCTimestamp),
-    xToTime: (x) => chart.timeScale().coordinateToTime(x as any) as number | null,
+    xToTime: (x) => chart.timeScale().coordinateToTime(x as Coordinate) as number | null,
     priceToY: (p) => candles.priceToCoordinate(p),
-    yToPrice: (y) => candles.coordinateToPrice(y as any) as number | null,
+    yToPrice: (y) => candles.coordinateToPrice(y as Coordinate) as number | null,
     snapPoint: (x, y) => {
       if (currentBars.length === 0) return null;
-      const t = chart.timeScale().coordinateToTime(x as any) as number | null;
+      const t = chart.timeScale().coordinateToTime(x as Coordinate) as number | null;
       if (t === null) return null;
       const bi = barIndexAt(currentBars, t);
       if (bi < 0 || bi >= currentBars.length) return null;
       const b = currentBars[bi];
       const bx = chart.timeScale().timeToCoordinate(b.time as UTCTimestamp);
       if (bx === null || Math.abs(bx - x) > 24) return null;
-      const py = candles.coordinateToPrice(y as any);
+      const py = candles.coordinateToPrice(y as Coordinate);
       if (py === null) return null;
       const levels = [b.high, b.low, b.open, b.close];
       let bestPrice = levels[0];

@@ -101,6 +101,7 @@ export class LiveState {
         } else {
           const insertIdx = findBarInsertIndex(bars, b.time);
           bars.splice(insertIdx, 0, b);
+          console.warn(`Inserted out-of-order bar at time ${b.time}`);
         }
       }
 

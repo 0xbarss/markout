@@ -1,6 +1,15 @@
 import { h } from "../dom.ts";
 import type { DrawingManager } from "../drawings/manager.ts";
-import { formatRgba, parseColor } from "../drawings/style_utils.ts";
+import {
+  formatRgba,
+  getDrawingColor,
+  getDrawingLineStyle,
+  getDrawingWidth,
+  parseColor,
+  setDrawingColor,
+  setDrawingLineStyle,
+  setDrawingWidth,
+} from "../drawings/style_utils.ts";
 import type { Drawing, LineStyleType, Point } from "../drawings/types.ts";
 import { showDialog } from "./dialog.ts";
 
@@ -196,26 +205,24 @@ export function openDrawingSettingsDialog(drawing: Drawing, manager: DrawingMana
   const titleName = drawing.type.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   // General Line / Stroke styling (if applicable)
-  if ("color" in draft || !("color" in draft)) {
-    const curColor = (draft as any).color ?? ("type" in draft && draft.type === "horizontal" ? "#848e9c" : "#f7a600");
-    const picker = createColorPicker(curColor, (c) => {
-      (draft as any).color = c;
-      updatePreview();
-    });
-    styleContent.append(createFormRow("Color", picker));
-  }
+  const curColor = getDrawingColor(draft);
+  const picker = createColorPicker(curColor, (c) => {
+    setDrawingColor(draft, c);
+    updatePreview();
+  });
+  styleContent.append(createFormRow("Color", picker));
 
   if (draft.type !== "text") {
-    const curWidth = (draft as any).lineWidth ?? (draft.type === "arrow" ? 2 : 1.5);
+    const curWidth = getDrawingWidth(draft);
     const widthSelect = createLineWidthSelect(curWidth, (w) => {
-      (draft as any).lineWidth = w;
+      setDrawingWidth(draft, w);
       updatePreview();
     });
     styleContent.append(createFormRow("Line Width", widthSelect));
 
-    const curStyle = (draft as any).lineStyle ?? (draft.type === "horizontal" || draft.type === "vertical" ? "dashed" : "solid");
+    const curStyle = getDrawingLineStyle(draft);
     const styleSelect = createLineStyleSelect(curStyle, (s) => {
-      (draft as any).lineStyle = s;
+      setDrawingLineStyle(draft, s);
       updatePreview();
     });
     styleContent.append(createFormRow("Line Style", styleSelect));

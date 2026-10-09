@@ -97,7 +97,7 @@ The Vite development server runs at `http://localhost:5173` and proxies `/api` a
   - `camelCase` for variables, properties, and functions.
   - `PascalCase` for types, interfaces, and classes.
   - `SCREAMING_SNAKE_CASE` for module constants.
-  - `kebab-case` for file names (`style-utils.ts`), except when a file's sole export is a class matching its name (`ReplayController.ts`).
+  - `kebab-case` or `snake_case` for file names (e.g. `style_utils.ts`, `sl_tp_trail.ts`), with `.ts` extensions required on all relative module imports.
 
 ### Prose and Comment Style
 

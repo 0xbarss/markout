@@ -279,7 +279,10 @@ export class DrawingManager {
     }
 
     if (dp === 0) {
-      const p = (orig as any).p1?.price ?? (orig as any).price ?? (orig as any).entry?.price ?? 100;
+      let p = 100;
+      if ("p1" in orig) p = orig.p1.price;
+      else if ("price" in orig && typeof orig.price === "number") p = orig.price;
+      else if ("entry" in orig) p = orig.entry.price;
       dp = p * 0.01 || 1;
     }
 
