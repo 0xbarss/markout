@@ -1,6 +1,6 @@
 [package]
 name = "markout-app"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.88"
 authors = ["0xbarss"]
@@ -12,14 +12,15 @@ readme = "README.md"
 keywords = ["trading", "visualizer", "replay", "timeseries", "parquet"]
 categories = ["visualization", "command-line-utilities", "development-tools"]
 include = [
-    "src/**/*",
-    "web/dist/**/*",
-    "examples/**/*",
-    "build.rs",
-    "Cargo.toml",
-    "LICENSE",
-    "README.md",
-    "CONTRIBUTING.md",
+    "/src/**/*",
+    "/web/dist/**/*",
+    "/examples/**/*",
+    "/build.rs",
+    "/Cargo.toml",
+    "/LICENSE",
+    "/README.md",
+    "/CONTRIBUTING.md",
+    "/CHANGELOG.md",
 ]
 
 [lib]

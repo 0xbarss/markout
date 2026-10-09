@@ -42,7 +42,7 @@ jobs:
       - name: Verify published crate contents
         run: |
           rm -rf web/node_modules
-          if cargo package --list --allow-dirty | grep -vE '^(src/|web/dist/|examples/|build\.rs|Cargo\.|LICENSE|README|CONTRIBUTING|\.cargo_vcs_info)'; then
+          if cargo package --list --allow-dirty | grep -vE '^(src/|web/dist/|examples/|build\.rs|Cargo\.|LICENSE|README|CONTRIBUTING|CHANGELOG|\.cargo_vcs_info)'; then
             echo "Unexpected files in cargo package list"
             exit 1
           fi

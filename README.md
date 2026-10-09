@@ -63,6 +63,13 @@ Reviewing algorithmic trading strategies usually means inspecting how individual
 3. A candle-by-candle replay engine with ghost mode hides future candles, trailing stop updates, and exit fills until playback reaches them.
 4. An internal broadcast bus streams live bars, ticks, and order lifecycle events over WebSockets to connected browsers.
 
+### Scope & Design Boundaries
+
+To keep `markout` focused, lightweight, and robust, it operates within clear boundaries:
+- **No Direct Broker Order Execution**: `markout` is an analytical visualizer, inspection tool, and telemetry monitor. It does not route live orders to financial exchanges or brokers.
+- **In-Memory Analytical Engine**: All ingested bars, trades, and strategy signals are loaded into memory for responsive, client-side interaction. It is not an archival database or long-term storage engine.
+- **Decoupled Data Feeds**: While `markout` provides standard schemas and a WebSocket streaming protocol (`/ws/stream`), external bridges (such as Python scripts or dedicated broker bridge utilities like `mt5-markout`) push data into it.
+
 ---
 
 ## Architecture & Design
@@ -353,7 +360,7 @@ Add `markout-app` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-markout-app = "1.0"
+markout-app = "1.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -458,6 +465,7 @@ Options:
       --allow-host <HOST>    Allowed Host header values (can be repeated)
       --allow-origin <ORIGIN> Allowed WebSocket Origin values (can be repeated)
       --allow-ws-publish     Allow clients to publish MarketEvent frames over WebSocket
+      --lenient              Allow lenient parsing for trade files (e.g. Parquet defaults)
   -h, --help                 Print help
   -V, --version              Print version
 ```
@@ -633,13 +641,11 @@ Verifies:
 
 ## Troubleshooting & FAQ
 
-### 1. Embedded assets not found during compilation
+### 1. Embedded assets and compilation
 
-**Problem**: `cargo build` fails with an error referencing missing files in `web/dist/`.
+**Scenario**: Compiling the project from source without pre-building `web/dist/`.
 
-**Cause**: The Rust binary uses `rust-embed` to bake frontend assets into the binary at compile time. If `web/dist/` has not been generated, the compiler cannot find the asset folder.
-
-**Solution**: Build the frontend bundle before compiling the Rust binary:
+**Behavior**: The crate includes a `build.rs` script that automatically provisions a fallback placeholder if `web/dist/` is absent, allowing `cargo check`, test, and library builds to proceed without failure. However, to access the complete interactive charting interface, build the frontend bundle before compiling the release binary:
 ```bash
 cd web && npm install && npm run build && cd ..
 cargo build --release
